@@ -15,6 +15,7 @@ You can find examples of setting up `odin-imgui` using the provided [implementat
 
 Done:
  - SDL with OpenGL 4.5
+ - GLFW with OpenGL 4.5
 
 WIP:
  - SDL with D3D11
@@ -23,8 +24,8 @@ WIP:
 
 Implementations are reusable bits of code using popular odin libraries/bidings, inside the `impl` folder there currently are;
 
- - SDL using [`odin-sdl2`](https://github.com/JoshuaManton/odin-sdl2)
- - OpenGL using [`odin-gl`](https://github.com/vassvik/odin-gl)
+ - SDL using [`vendor:sdl2`](https://github.com/odin-lang/Odin/tree/master/vendor/sdl2)
+ - OpenGL using [`vendor:OpenGL`](https://github.com/odin-lang/Odin/tree/master/vendor/OpenGL)
 
 ## Notes:
 * Most functions have been wrapped or bound, those missing will either be added by the maintainer over time or by PR (PRs VERY WELCOME)
