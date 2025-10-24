@@ -1,12 +1,18 @@
 # Odin ImGui
 
+## Notice [Fork]
+
+This is a fork of [Nadako's Odin Imgui](https://gitlab.com/nadako/odin-imgui), which is itself a fork of [L4's Odin Imgui](https://gitlab.com/L-4/odin-imgui).
+
+This adds support for SDL3 using `sdl3.Renderer`, which is currently lacking from both other versions of the repository.
+
 ## Generated Dear ImGui bindings using dear_bindings
 
  - Generates bindings for the and `docking` ImGui branche, using [`dear_bindings`](https://github.com/dearimgui/dear_bindings)
 	- No longer supports `master` branch.
  - Contains bindings for most of the Dear ImGui implementations
 	- All backends which exist in `vendor:` have bindings
-	- These include: `vulkan, sdl2, opengl3, sdlrenderer2, glfw, dx11, dx12, win32, osx, metal, wgpu`
+	- These include: `vulkan, sdl2, sdl3, opengl3, sdlrenderer2, glfw, dx11, dx12, win32, osx, metal, wgpu`
  - Compiles bindings as well as any wanted backends
  - Tested on Windows, Linux, and Mac
  - Includes several examples which can be used as a reference
@@ -75,9 +81,9 @@ It seems likely to me that SDL3, and maybe Android will exist in vendor in the f
 | OpenGL 3       |     Yes      |     Yes     |                                                                      |
 | OSX            |     Yes      |     No      |                                                                      |
 | SDL 2          |     Yes      |     Yes     |                                                                      |
-| SDL 3          |      No      |     No      | No odin bindings in vendor (yet)                                     |
+| SDL 3          |     Yes      |     No      |                                    								     |
 | SDL_Renderer 2 |     Yes      |     Yes     | Has example, but Odin vendor library lacks required version (2.0.18) |
-| SDL_Renderer 3 |      No      |     No      | No odin bindings in vendor (yet)                                     |
+| SDL_Renderer 3 |     Yes      |     No      |                                     								 |
 | Vulkan         |     Yes      |     No      | Tested in my own engine, but no example yet due to size              |
 | WebGPU         |     Yes      |     Yes     | Browser/JS not supported, would require some emscripten workaround   |
 | win32          |     Yes      |     No      | Bindings created, but not tested                                     |
