@@ -33,7 +33,7 @@ main :: proc() {
 	assert(sdlInitialized)
 	defer sdl.Quit()
 
-	title :: "Dear ImGui SDL3+Metal example"
+	title :: "Dear ImGui SDL3+SDL Renderer example"
 	screenCoords := i64(sdl.WINDOWPOS_CENTERED)
 
 	windowProps := sdl.CreateProperties()
