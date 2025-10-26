@@ -19,8 +19,6 @@ foreign lib {
 	RenderDrawData :: proc(draw_data: ^imgui.DrawData, renderer: ^sdl.Renderer) ---
 
 	// Called by Init/NewFrame/Shutdown
-	CreateFontsTexture   :: proc() -> bool ---
-	DestroyFontsTexture  :: proc() ---
 	CreateDeviceObjects  :: proc() -> bool ---
 	DestroyDeviceObjects :: proc() ---
 }

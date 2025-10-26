@@ -56,8 +56,6 @@ foreign lib {
 	Shutdown :: proc() ---
 	NewFrame :: proc() ---
 	RenderDrawData :: proc(draw_data: ^imgui.DrawData, command_buffer: vk.CommandBuffer, pipeline: vk.Pipeline = {}) ---
-	CreateFontsTexture :: proc() -> bool ---
-	DestroyFontsTexture :: proc() ---
 	SetMinImageCount :: proc(min_image_count: u32) --- // To override MinImageCount after initialization (e.g. if swap chain is recreated)
 
 	// Register a texture (VkDescriptorSet == ImTextureID)
