@@ -17,7 +17,7 @@ else when ODIN_OS == .Darwin  {
 }
 
 // imgui_impl_metal.h
-// Last checked `v1.91.1-docking` (6df1a0)
+// Last checked `v1.92.4-docking` (e7d2d63)
 @(link_prefix="ImGui_ImplMetal_")
 foreign lib {
 	Init           :: proc(device: ^mtl.Device) -> bool ---
@@ -28,8 +28,6 @@ foreign lib {
 						   commandEncoder: ^mtl.RenderCommandEncoder) ---
 
 	// Called by Init/NewFrame/Shutdown
-	CreateFontsTexture   :: proc(device: ^mtl.Device) -> bool ---
-	DestroyFontsTexture  :: proc() ---
 	CreateDeviceObjects  :: proc(device: ^mtl.Device) -> bool ---
 	DestroyDeviceObjects :: proc() ---
 }
