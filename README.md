@@ -1,10 +1,13 @@
 # Odin ImGui
 
-## Notice [Fork]
+## Notice [Fork heritage] 
 
-This is a fork of [Nadako's Odin Imgui](https://gitlab.com/nadako/odin-imgui), which is itself a fork of [L4's Odin Imgui](https://gitlab.com/L-4/odin-imgui).
+This is a derivative work based on the past maintainers: 
+* [W3LF fork](https://github.com/giornetta/odin-imgui)
+* [Nadako](https://gitlab.com/nadako/odin-imgui)
+* [L4](https://gitlab.com/L-4/odin-imgui) (original author).
 
-This adds support for SDL3 using `sdl3.Renderer`, which is currently lacking from both other versions of the repository.
+Initial objective of this fork was to upgrade the Dear Imgui to v1.92.X (major update with many breaking changes), as well as adding more examples for SDL3 and Metal.
 
 ## Generated Dear ImGui bindings using dear_bindings
 
