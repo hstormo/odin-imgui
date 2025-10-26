@@ -1,4 +1,4 @@
-package imgui_example_sdl2_metal
+package imgui_example_sdl3_metal
 
 // This is an example of using the bindings with SDL3 and Metal
 // For a more complete example with comments, see:
