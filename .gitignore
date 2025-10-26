@@ -7,3 +7,5 @@ dear_bindings/
 backend_deps/
 ols.json
 imgui_linux_x64.a
+imgui_darwin_x64.a
+imgui_darwin_arm64.a

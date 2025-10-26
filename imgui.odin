@@ -17,12 +17,12 @@ CHECKVERSION :: proc() {
 // DEFINES
 ////////////////////////////////////////////////////////////
 
-VERSION                      :: "1.91.9b"
-VERSION_NUM                  :: 19191
-PAYLOAD_TYPE_COLOR_3F        :: "_COL3F"  // float[3]: Standard type for colors, without alpha. User code may use this type.
-PAYLOAD_TYPE_COLOR_4F        :: "_COL4F"  // float[4]: Standard type for colors. User code may use this type.
-UNICODE_CODEPOINT_INVALID    :: 0xFFFD    // Invalid Unicode code point (standard value).
-UNICODE_CODEPOINT_MAX        :: 0xFFFF    // Maximum Unicode code point supported by this build.
+VERSION                      :: "1.92.4"
+VERSION_NUM                  :: 19240
+PAYLOAD_TYPE_COLOR_3F        :: "_COL3F" // float[3]: Standard type for colors, without alpha. User code may use this type.
+PAYLOAD_TYPE_COLOR_4F        :: "_COL4F" // float[4]: Standard type for colors. User code may use this type.
+UNICODE_CODEPOINT_INVALID    :: 0xFFFD   // Invalid Unicode code point (standard value).
+UNICODE_CODEPOINT_MAX        :: 0xFFFF   // Maximum Unicode code point supported by this build.
 DRAWLIST_TEX_LINES_WIDTH_MAX :: 32
 
 ////////////////////////////////////////////////////////////
@@ -69,7 +69,7 @@ WindowFlags_NoDecoration :: WindowFlags{.NoTitleBar,.NoResize,.NoScrollbar,.NoCo
 WindowFlags_NoInputs     :: WindowFlags{.NoMouseInputs,.NoNavInputs,.NoNavFocus}
 
 // Flags for ImGui::BeginChild()
-// (Legacy: bit 0 must always correspond to ImGuiChildFlags_Borders to be backward compatible with old API using 'bool border = false'.
+// (Legacy: bit 0 must always correspond to ImGuiChildFlags_Borders to be backward compatible with old API using 'bool border = false'.)
 // About using AutoResizeX/AutoResizeY flags:
 // - May be combined with SetNextWindowSizeConstraints() to set a min/max size for each axis (see "Demo->Child->Auto-resize with Constraints").
 // - Size measurement for a given axis is only performed when the child window is within visible boundaries, or is just appearing.
@@ -137,6 +137,14 @@ InputTextFlag :: enum c.int {
 	CallbackCharFilter = 21, // Callback on character inputs to replace or discard them. Modify 'EventChar' to replace or discard, or return 1 in callback to discard.
 	CallbackResize     = 22, // Callback on buffer capacity changes request (beyond 'buf_size' parameter value), allowing the string to grow. Notify when the string wants to be resized (for string types which hold a cache of their Size). You will be provided a new BufSize in the callback and NEED to honor it. (see misc/cpp/imgui_stdlib.h for an example of using this)
 	CallbackEdit       = 23, // Callback on any edit. Note that InputText() already returns true on edit + you can always use IsItemEdited(). The callback is useful to manipulate the underlying buffer while focus is active.
+	// Multi-line Word-Wrapping [BETA]
+	// - Not well tested yet. Please report any incorrect cursor movement, selection behavior etc. bug to https://github.com/ocornut/imgui/issues/3237.
+	// - Wrapping style is not ideal. Wrapping of long words/sections (e.g. words larger than total available width) may be particularly unpleasing.
+	// - Wrapping width needs to always account for the possibility of a vertical scrollbar.
+	// - It is much slower than regular text fields.
+	//   Ballpark estimate of cost on my 2019 desktop PC: for a 100 KB text buffer: +~0.3 ms (Optimized) / +~1.0 ms (Debug build).
+	//   The CPU cost is very roughly proportional to text length, so a 10 KB buffer should cost about ten times less.
+	WordWrap = 24, // InputTextMultine(): word-wrap lines that are too long.
 }
 
 
@@ -160,12 +168,17 @@ TreeNodeFlag :: enum c.int {
 	SpanAllColumns      = 14, // Frame will span all columns of its container table (label will still fit in current column)
 	LabelSpanAllColumns = 15, // Label will span all columns of its container table
 	//ImGuiTreeNodeFlags_NoScrollOnOpen     = 1 << 16,  // FIXME: TODO: Disable automatic scroll on TreePop() if node got just open and contents is not visible
-	NavLeftJumpsBackHere = 17, // (WIP) Nav: left direction may move to this TreeNode() from any of its child (items submitted between TreeNode and TreePop)
+	NavLeftJumpsToParent = 17, // Nav: left arrow moves back to parent. This is processed in TreePop() when there's an unfullfilled Left nav request remaining.
+	// [EXPERIMENTAL] Draw lines connecting TreeNode hierarchy. Discuss in GitHub issue #2920.
+	// Default value is pulled from style.TreeLinesFlags. May be overridden in TreeNode calls.
+	DrawLinesNone    = 18, // No lines drawn
+	DrawLinesFull    = 19, // Horizontal lines to child nodes. Vertical line drawn down to TreePop() position: cover full contents. Faster (for large trees).
+	DrawLinesToNodes = 20, // Horizontal lines to child nodes. Vertical line drawn down to bottom-most child node. Slower (for large trees).
 }
 
-TreeNodeFlags_CollapsingHeader :: TreeNodeFlags{.Framed,.NoTreePushOnOpen,.NoAutoOpenOnLog}
-TreeNodeFlags_AllowItemOverlap :: TreeNodeFlags{.AllowOverlap}                              // Renamed in 1.89.7
-TreeNodeFlags_SpanTextWidth    :: TreeNodeFlags{.SpanLabelWidth}                            // Renamed in 1.90.7
+TreeNodeFlags_CollapsingHeader     :: TreeNodeFlags{.Framed,.NoTreePushOnOpen,.NoAutoOpenOnLog}
+TreeNodeFlags_NavLeftJumpsBackHere :: TreeNodeFlags{.NavLeftJumpsToParent}                      // Renamed in 1.92.0
+TreeNodeFlags_SpanTextWidth        :: TreeNodeFlags{.SpanLabelWidth}                            // Renamed in 1.90.7
 
 // Flags for OpenPopup*(), BeginPopupContext*(), IsPopupOpen() functions.
 // - To be backward compatible with older API which took an 'int mouse_button = 1' argument instead of 'ImGuiPopupFlags flags',
@@ -199,10 +212,10 @@ SelectableFlag :: enum c.int {
 	Disabled          = 3, // Cannot be selected, display grayed out text
 	AllowOverlap      = 4, // (WIP) Hit testing to allow subsequent widgets to overlap this one
 	Highlight         = 5, // Make the item be displayed as if it is hovered
+	SelectOnNav       = 6, // Auto-select when moved into, unless Ctrl is held. Automatic when in a BeginMultiSelect() block.
 }
 
-SelectableFlags_DontClosePopups  :: SelectableFlags{.NoAutoClosePopups} // Renamed in 1.91.0
-SelectableFlags_AllowItemOverlap :: SelectableFlags{.AllowOverlap}      // Renamed in 1.89.7
+SelectableFlags_DontClosePopups :: SelectableFlags{.NoAutoClosePopups} // Renamed in 1.91.0
 
 // Flags for ImGui::BeginCombo()
 ComboFlags :: bit_set[ComboFlag; c.int]
@@ -229,12 +242,15 @@ TabBarFlag :: enum c.int {
 	NoTabListScrollingButtons    = 4, // Disable scrolling buttons (apply when fitting policy is ImGuiTabBarFlags_FittingPolicyScroll)
 	NoTooltip                    = 5, // Disable tooltips when hovering a tab
 	DrawSelectedOverline         = 6, // Draw selected overline markers over selected tab
-	FittingPolicyResizeDown      = 7, // Resize tabs when they don't fit
-	FittingPolicyScroll          = 8, // Add scroll buttons when tabs don't fit
+	// Fitting/Resize policy
+	FittingPolicyMixed  = 7, // Shrink down tabs when they don't fit, until width is style.TabMinWidthShrink, then enable scrolling buttons.
+	FittingPolicyShrink = 8, // Shrink down tabs when they don't fit
+	FittingPolicyScroll = 9, // Enable scrolling buttons when tabs don't fit
 }
 
-TabBarFlags_FittingPolicyMask_    :: TabBarFlags{.FittingPolicyResizeDown,.FittingPolicyScroll}
-TabBarFlags_FittingPolicyDefault_ :: TabBarFlags{.FittingPolicyResizeDown}
+TabBarFlags_FittingPolicyMask_      :: TabBarFlags{.FittingPolicyMixed,.FittingPolicyShrink,.FittingPolicyScroll}
+TabBarFlags_FittingPolicyDefault_   :: TabBarFlags{.FittingPolicyMixed}
+TabBarFlags_FittingPolicyResizeDown :: TabBarFlags{.FittingPolicyShrink}                                          // Renamed in 1.92.2
 
 // Flags for ImGui::BeginTabItem()
 TabItemFlags :: bit_set[TabItemFlag; c.int]
@@ -400,7 +416,7 @@ Key :: enum c.int { // Forward declared enum type ImGuiKey
 	LeftCtrl,
 	LeftShift,
 	LeftAlt,
-	LeftSuper,
+	LeftSuper,            // Also see ImGuiMod_Ctrl, ImGuiMod_Shift, ImGuiMod_Alt, ImGuiMod_Super below!
 	RightCtrl,
 	RightShift,
 	RightAlt,
@@ -502,32 +518,34 @@ Key :: enum c.int { // Forward declared enum type ImGuiKey
 	AppBack,              // Available on some keyboard/mouses. Often referred as "Browser Back"
 	AppForward,
 	Oem102,               // Non-US backslash.
-	// Gamepad (some of those are analog values, 0.0f to 1.0f)                          // NAVIGATION ACTION
+	// Gamepad
+	// (analog values are 0.0f to 1.0f)
 	// (download controller mapping PNG/PSD at http://dearimgui.com/controls_sheets)
-	GamepadStart,       // Menu (Xbox)      + (Switch)   Start/Options (PS)
-	GamepadBack,        // View (Xbox)      - (Switch)   Share (PS)
-	GamepadFaceLeft,    // X (Xbox)         Y (Switch)   Square (PS)        // Tap: Toggle Menu. Hold: Windowing mode (Focus/Move/Resize windows)
-	GamepadFaceRight,   // B (Xbox)         A (Switch)   Circle (PS)        // Cancel / Close / Exit
-	GamepadFaceUp,      // Y (Xbox)         X (Switch)   Triangle (PS)      // Text Input / On-screen Keyboard
-	GamepadFaceDown,    // A (Xbox)         B (Switch)   Cross (PS)         // Activate / Open / Toggle / Tweak
-	GamepadDpadLeft,    // D-pad Left                                       // Move / Tweak / Resize Window (in Windowing mode)
-	GamepadDpadRight,   // D-pad Right                                      // Move / Tweak / Resize Window (in Windowing mode)
-	GamepadDpadUp,      // D-pad Up                                         // Move / Tweak / Resize Window (in Windowing mode)
-	GamepadDpadDown,    // D-pad Down                                       // Move / Tweak / Resize Window (in Windowing mode)
-	GamepadL1,          // L Bumper (Xbox)  L (Switch)   L1 (PS)            // Tweak Slower / Focus Previous (in Windowing mode)
-	GamepadR1,          // R Bumper (Xbox)  R (Switch)   R1 (PS)            // Tweak Faster / Focus Next (in Windowing mode)
-	GamepadL2,          // L Trig. (Xbox)   ZL (Switch)  L2 (PS) [Analog]
-	GamepadR2,          // R Trig. (Xbox)   ZR (Switch)  R2 (PS) [Analog]
-	GamepadL3,          // L Stick (Xbox)   L3 (Switch)  L3 (PS)
-	GamepadR3,          // R Stick (Xbox)   R3 (Switch)  R3 (PS)
-	GamepadLStickLeft,  // [Analog]                                         // Move Window (in Windowing mode)
-	GamepadLStickRight, // [Analog]                                         // Move Window (in Windowing mode)
-	GamepadLStickUp,    // [Analog]                                         // Move Window (in Windowing mode)
-	GamepadLStickDown,  // [Analog]                                         // Move Window (in Windowing mode)
-	GamepadRStickLeft,  // [Analog]
-	GamepadRStickRight, // [Analog]
-	GamepadRStickUp,    // [Analog]
-	GamepadRStickDown,  // [Analog]
+	//                              // XBOX        | SWITCH  | PLAYSTA. | -> ACTION
+	GamepadStart,       // Menu        | +       | Options  |
+	GamepadBack,        // View        | -       | Share    |
+	GamepadFaceLeft,    // X           | Y       | Square   | Tap: Toggle Menu. Hold: Windowing mode (Focus/Move/Resize windows)
+	GamepadFaceRight,   // B           | A       | Circle   | Cancel / Close / Exit
+	GamepadFaceUp,      // Y           | X       | Triangle | Text Input / On-screen Keyboard
+	GamepadFaceDown,    // A           | B       | Cross    | Activate / Open / Toggle / Tweak
+	GamepadDpadLeft,    // D-pad Left  | "       | "        | Move / Tweak / Resize Window (in Windowing mode)
+	GamepadDpadRight,   // D-pad Right | "       | "        | Move / Tweak / Resize Window (in Windowing mode)
+	GamepadDpadUp,      // D-pad Up    | "       | "        | Move / Tweak / Resize Window (in Windowing mode)
+	GamepadDpadDown,    // D-pad Down  | "       | "        | Move / Tweak / Resize Window (in Windowing mode)
+	GamepadL1,          // L Bumper    | L       | L1       | Tweak Slower / Focus Previous (in Windowing mode)
+	GamepadR1,          // R Bumper    | R       | R1       | Tweak Faster / Focus Next (in Windowing mode)
+	GamepadL2,          // L Trigger   | ZL      | L2       | [Analog]
+	GamepadR2,          // R Trigger   | ZR      | R2       | [Analog]
+	GamepadL3,          // L Stick     | L3      | L3       |
+	GamepadR3,          // R Stick     | R3      | R3       |
+	GamepadLStickLeft,  //             |         |          | [Analog] Move Window (in Windowing mode)
+	GamepadLStickRight, //             |         |          | [Analog] Move Window (in Windowing mode)
+	GamepadLStickUp,    //             |         |          | [Analog] Move Window (in Windowing mode)
+	GamepadLStickDown,  //             |         |          | [Analog] Move Window (in Windowing mode)
+	GamepadRStickLeft,  //             |         |          | [Analog]
+	GamepadRStickRight, //             |         |          | [Analog]
+	GamepadRStickUp,    //             |         |          | [Analog]
+	GamepadRStickDown,  //             |         |          | [Analog]
 	// Aliases: Mouse Buttons (auto-submitted from AddMouseButtonEvent() calls)
 	// - This is mirroring the data also written to io.MouseDown[], io.MouseWheel, in a format allowing them to be accessed via standard key API.
 	MouseLeft,
@@ -542,10 +560,13 @@ Key :: enum c.int { // Forward declared enum type ImGuiKey
 	ReservedForModShift,
 	ReservedForModAlt,
 	ReservedForModSuper,
+	// [Internal] If you need to iterate all keys (for e.g. an input mapper) you may use ImGuiKey_NamedKey_BEGIN..ImGuiKey_NamedKey_END.
 	NamedKey_END,
+	NamedKey_COUNT = 155,
 	// Keyboard Modifiers (explicitly submitted by backend via AddKeyEvent() calls)
-	// - This is mirroring the data also written to io.KeyCtrl, io.KeyShift, io.KeyAlt, io.KeySuper, in a format allowing
-	//   them to be accessed via standard key API, allowing calls such as IsKeyPressed(), IsKeyReleased(), querying duration etc.
+	// - Any functions taking a ImGuiKeyChord parameter can binary-or those with regular keys, e.g. Shortcut(ImGuiMod_Ctrl | ImGuiKey_S).
+	// - Those are written back into io.KeyCtrl, io.KeyShift, io.KeyAlt, io.KeySuper for convenience,
+	//   but may be accessed via standard key API such as IsKeyPressed(), IsKeyReleased(), querying duration etc.
 	// - Code polling every key (e.g. an interface to detect a key press for input mapping) might want to ignore those
 	//   and prefer using the real keys (e.g. ImGuiKey_LeftCtrl, ImGuiKey_RightCtrl instead of ImGuiMod_Ctrl).
 	// - In theory the value of keyboard modifiers should be roughly equivalent to a logical or of the equivalent left/right keys.
@@ -553,13 +574,11 @@ Key :: enum c.int { // Forward declared enum type ImGuiKey
 	//   backends tend to interfere and break that equivalence. The safer decision is to relay that ambiguity down to the end-user...
 	// - On macOS, we swap Cmd(Super) and Ctrl keys at the time of the io.AddKeyEvent() call.
 	ImGuiMod_None = 0,
-	ImGuiMod_Ctrl = 4096,   // Ctrl (non-macOS), Cmd (macOS)
-	ImGuiMod_Shift = 8192,  // Shift
-	ImGuiMod_Alt = 16384,   // Option/Menu
-	ImGuiMod_Super = 32768, // Windows/Super (non-macOS), Ctrl (macOS)
-	ImGuiMod_Mask_ = 61440, // 4-bits
-	// [Internal] If you need to iterate all keys (for e.g. an input mapper) you may use ImGuiKey_NamedKey_BEGIN..ImGuiKey_NamedKey_END.
-	NamedKey_COUNT = 155,
+	ImGuiMod_Ctrl = 4096,     // Ctrl (non-macOS), Cmd (macOS)
+	ImGuiMod_Shift = 8192,    // Shift
+	ImGuiMod_Alt = 16384,     // Option/Menu
+	ImGuiMod_Super = 32768,   // Windows/Super (non-macOS), Ctrl (macOS)
+	ImGuiMod_Mask_ = 61440,   // 4-bits
 	COUNT = 667,              // Obsoleted in 1.91.5 because it was extremely misleading (since named keys don't start at 0 anymore)
 	ImGuiMod_Shortcut = 4096, // Removed in 1.90.7, you can now simply use ImGuiMod_Ctrl
 	ModCtrl = 4096,
@@ -603,14 +622,14 @@ ConfigFlag :: enum c.int {
 	DockingEnable = 7, // Docking enable flags.
 	// [BETA] Viewports
 	// When using viewports it is recommended that your default value for ImGuiCol_WindowBg is opaque (Alpha=1.0) so transition to a viewport won't be noticeable.
-	ViewportsEnable         = 10, // Viewport enable flags (require both ImGuiBackendFlags_PlatformHasViewports + ImGuiBackendFlags_RendererHasViewports set by the respective backends)
-	DpiEnableScaleViewports = 14, // [BETA: Don't use] FIXME-DPI: Reposition and resize imgui windows when the DpiScale of a viewport changed (mostly useful for the main viewport hosting other window). Note that resizing the main window itself is up to your application.
-	DpiEnableScaleFonts     = 15, // [BETA: Don't use] FIXME-DPI: Request bitmap-scaled fonts to match DpiScale. This is a very low-quality workaround. The correct way to handle DPI is _currently_ to replace the atlas and/or fonts in the Platform_OnChangedViewport callback, but this is all early work in progress.
+	ViewportsEnable = 10, // Viewport enable flags (require both ImGuiBackendFlags_PlatformHasViewports + ImGuiBackendFlags_RendererHasViewports set by the respective backends)
 	// User storage (to allow your backend/engine to communicate to code that may be shared between multiple projects. Those flags are NOT used by core Dear ImGui)
-	IsSRGB               = 20, // Application is SRGB-aware.
-	IsTouchScreen        = 21, // Application is using a touch screen instead of a mouse.
-	NavEnableSetMousePos = 2,  // [moved/renamed in 1.91.4] -> use bool io.ConfigNavMoveSetMousePos
-	NavNoCaptureKeyboard = 3,  // [moved/renamed in 1.91.4] -> use bool io.ConfigNavCaptureKeyboard
+	IsSRGB                  = 20, // Application is SRGB-aware.
+	IsTouchScreen           = 21, // Application is using a touch screen instead of a mouse.
+	NavEnableSetMousePos    = 2,  // [moved/renamed in 1.91.4] -> use bool io.ConfigNavMoveSetMousePos
+	NavNoCaptureKeyboard    = 3,  // [moved/renamed in 1.91.4] -> use bool io.ConfigNavCaptureKeyboard
+	DpiEnableScaleFonts     = 14, // [moved/renamed in 1.92.0] -> use bool io.ConfigDpiScaleFonts
+	DpiEnableScaleViewports = 15, // [moved/renamed in 1.92.0] -> use bool io.ConfigDpiScaleViewports
 }
 
 
@@ -621,10 +640,12 @@ BackendFlag :: enum c.int {
 	HasMouseCursors      = 1, // Backend Platform supports honoring GetMouseCursor() value to change the OS cursor shape.
 	HasSetMousePos       = 2, // Backend Platform supports io.WantSetMousePos requests to reposition the OS mouse position (only used if io.ConfigNavMoveSetMousePos is set).
 	RendererHasVtxOffset = 3, // Backend Renderer supports ImDrawCmd::VtxOffset. This enables output of large meshes (64K+ vertices) while still using 16-bit indices.
-	// [BETA] Viewports
-	PlatformHasViewports    = 10, // Backend Platform supports multiple viewports.
-	HasMouseHoveredViewport = 11, // Backend Platform supports calling io.AddMouseViewportEvent() with the viewport under the mouse. IF POSSIBLE, ignore viewports with the ImGuiViewportFlags_NoInputs flag (Win32 backend, GLFW 3.30+ backend can do this, SDL backend cannot). If this cannot be done, Dear ImGui needs to use a flawed heuristic to find the viewport under.
-	RendererHasViewports    = 12, // Backend Renderer supports multiple viewports.
+	RendererHasTextures  = 4, // Backend Renderer supports ImTextureData requests to create/update/destroy textures. This enables incremental texture updates and texture reloads. See https://github.com/ocornut/imgui/blob/master/docs/BACKENDS.md for instructions on how to upgrade your custom backend.
+	// [BETA] Multi-Viewports
+	RendererHasViewports    = 10, // Backend Renderer supports multiple viewports.
+	PlatformHasViewports    = 11, // Backend Platform supports multiple viewports.
+	HasMouseHoveredViewport = 12, // Backend Platform supports calling io.AddMouseViewportEvent() with the viewport under the mouse. IF POSSIBLE, ignore viewports with the ImGuiViewportFlags_NoInputs flag (Win32 backend, GLFW 3.30+ backend can do this, SDL backend cannot). If this cannot be done, Dear ImGui needs to use a flawed heuristic to find the viewport under.
+	HasParentViewport       = 13, // Backend Platform supports honoring viewport->ParentViewport/ParentViewportId value, by applying the corresponding parent/child relation at the Platform level.
 }
 
 
@@ -663,6 +684,7 @@ Col :: enum c.int {
 	ResizeGrip,                // Resize grip in lower-right and lower-left corners of windows.
 	ResizeGripHovered,
 	ResizeGripActive,
+	InputTextCursor,           // InputText cursor/caret
 	TabHovered,                // Tab background, when hovered
 	Tab,                       // Tab background, when tab-bar is focused & tab is unselected
 	TabSelected,               // Tab background, when tab-bar is focused & tab is selected
@@ -682,17 +704,19 @@ Col :: enum c.int {
 	TableRowBg,                // Table row background (even rows)
 	TableRowBgAlt,             // Table row background (odd rows)
 	TextLink,                  // Hyperlink color
-	TextSelectedBg,
+	TextSelectedBg,            // Selected text inside an InputText
+	TreeLines,                 // Tree node hierarchy outlines when using ImGuiTreeNodeFlags_DrawLines
 	DragDropTarget,            // Rectangle highlighting a drop target
+	UnsavedMarker,             // Unsaved Document marker (in window title and tabs)
 	NavCursor,                 // Color of keyboard/gamepad navigation cursor/rectangle, when visible
 	NavWindowingHighlight,     // Highlight window when using CTRL+TAB
 	NavWindowingDimBg,         // Darken/colorize entire screen behind the CTRL+TAB window list, when active
 	ModalWindowDimBg,          // Darken/colorize entire screen behind a modal window, when one is active
 	COUNT,
-	TabActive = 35,            // [renamed in 1.90.9]
-	TabUnfocused = 37,         // [renamed in 1.90.9]
+	TabActive = 36,            // [renamed in 1.90.9]
+	TabUnfocused = 38,         // [renamed in 1.90.9]
 	TabUnfocusedActive,        // [renamed in 1.90.9]
-	NavHighlight = 54,         // [renamed in 1.91.4]
+	NavHighlight = 57,         // [renamed in 1.91.4]
 }
 
 // Enumeration for PushStyleVar() / PopStyleVar() to temporarily modify the ImGuiStyle structure.
@@ -725,15 +749,20 @@ StyleVar :: enum c.int {
 	CellPadding,                 // ImVec2    CellPadding
 	ScrollbarSize,               // float     ScrollbarSize
 	ScrollbarRounding,           // float     ScrollbarRounding
+	ScrollbarPadding,            // float     ScrollbarPadding
 	GrabMinSize,                 // float     GrabMinSize
 	GrabRounding,                // float     GrabRounding
 	ImageBorderSize,             // float     ImageBorderSize
 	TabRounding,                 // float     TabRounding
 	TabBorderSize,               // float     TabBorderSize
+	TabMinWidthBase,             // float     TabMinWidthBase
+	TabMinWidthShrink,           // float     TabMinWidthShrink
 	TabBarBorderSize,            // float     TabBarBorderSize
 	TabBarOverlineSize,          // float     TabBarOverlineSize
 	TableAngledHeadersAngle,     // float     TableAngledHeadersAngle
 	TableAngledHeadersTextAlign, // ImVec2  TableAngledHeadersTextAlign
+	TreeLinesSize,               // float     TreeLinesSize
+	TreeLinesRounding,           // float     TreeLinesRounding
 	ButtonTextAlign,             // ImVec2    ButtonTextAlign
 	SelectableTextAlign,         // ImVec2    SelectableTextAlign
 	SeparatorTextBorderSize,     // float     SeparatorTextBorderSize
@@ -993,6 +1022,13 @@ TableBgTarget :: enum c.int {
 	CellBg, // Set cell background color (top-most color)
 }
 
+// Flags for ImGuiListClipper (currently not fully exposed in function calls: a future refactor will likely add this to ImGuiListClipper::Begin function equivalent)
+ListClipperFlags :: bit_set[ListClipperFlag; c.int]
+ListClipperFlag :: enum c.int {
+	NoSetTableRowCounters = 0, // [Internal] Disabled modifying table row counters. Avoid assumption that 1 clipper item == 1 table row.
+}
+
+
 // Flags for BeginMultiSelect()
 MultiSelectFlags :: bit_set[MultiSelectFlag; c.int]
 MultiSelectFlag :: enum c.int {
@@ -1052,12 +1088,37 @@ DrawListFlag :: enum c.int {
 }
 
 
+// Most standard backends only support RGBA32 but we provide a single channel option for low-resource/embedded systems.
+TextureFormat :: enum c.int {
+	RGBA32, // 4 components per pixel, each is unsigned 8-bit. Total size = TexWidth * TexHeight * 4
+	Alpha8, // 1 component per pixel, each is unsigned 8-bit. Total size = TexWidth * TexHeight
+}
+
+// Status of a texture to communicate with Renderer Backend.
+TextureStatus :: enum c.int {
+	OK,
+	Destroyed,   // Backend destroyed the texture.
+	WantCreate,  // Requesting backend to create the texture. Set status OK when done.
+	WantUpdates, // Requesting backend to update specific blocks of pixels (write to texture portions which have never been used before). Set status OK when done.
+	WantDestroy, // Requesting backend to destroy the texture. Set status to Destroyed when done.
+}
+
 // Flags for ImFontAtlas build
 FontAtlasFlags :: bit_set[FontAtlasFlag; c.int]
 FontAtlasFlag :: enum c.int {
 	NoPowerOfTwoHeight = 0, // Don't round the height to next power of two
 	NoMouseCursors     = 1, // Don't build software mouse cursors into the atlas (save a little texture memory)
 	NoBakedLines       = 2, // Don't build thick line textures into the atlas (save a little texture memory, allow support for point/nearest filtering). The AntiAliasedLinesUseTex features uses them, otherwise they will be rendered using polygons (more expensive for CPU/GPU).
+}
+
+
+// Font flags
+// (in future versions as we redesign font loading API, this will become more important and better documented. for now please consider this as internal/advanced use)
+FontFlags :: bit_set[FontFlag; c.int]
+FontFlag :: enum c.int {
+	NoLoadError    = 1, // Disable throwing an error/assert when calling AddFontXXX() with missing file/data. Calling code is expected to check AddFontXXX() return value.
+	NoLoadGlyphs   = 2, // [Internal] Disable loading new glyphs.
+	LockBakedSizes = 3, // [Internal] Disable loading new baked sizes, disable garbage collecting current ones. e.g. if you want to lock a font to a single size. Important: if you use this to preload given sizes, consider the possibility of multiple font density used on Retina display.
 }
 
 
@@ -1089,6 +1150,12 @@ ViewportFlag :: enum c.int {
 
 Vec2 :: [2]f32
 Vec4 :: [4]f32
+TextureRef :: struct {
+	// Members (either are set, never both!)
+	_TexData: ^TextureData, //      A texture, generally owned by a ImFontAtlas. Will convert to ImTextureID during render loop, after texture has been uploaded.
+	_TexID:   TextureID,    // _OR_ Low-level backend texture identifier, if already uploaded or created by user/app. Generally provided to e.g. ImGui::Image() calls.
+}
+
 // Sorting specifications for a table (often handling sort specs for a single column, occasionally more)
 // Obtained by calling TableGetSortSpecs().
 // When 'SpecsDirty == true' you can sort your data. It will be true with sorting specs have changed since last call, or the first time.
@@ -1107,13 +1174,7 @@ TableColumnSortSpecs :: struct {
 	SortDirection: SortDirection, // ImGuiSortDirection_Ascending or ImGuiSortDirection_Descending
 }
 
-Vector_Wchar :: struct { // Instantiation of ImVector<ImWchar>
-	Size:     c.int,
-	Capacity: c.int,
-	Data:     ^Wchar,
-}
-
-Vector_TextFilter_ImGuiTextRange :: struct { // Instantiation of ImVector<ImGuiTextFilter_ImGuiTextRange>
+Vector_TextRange :: struct { // Instantiation of ImVector<ImGuiTextRange>
 	Size:     c.int,
 	Capacity: c.int,
 	Data:     ^TextFilter_ImGuiTextRange,
@@ -1137,6 +1198,12 @@ Vector_SelectionRequest :: struct { // Instantiation of ImVector<ImGuiSelectionR
 	Data:     ^SelectionRequest,
 }
 
+Vector_DrawChannel :: struct { // Instantiation of ImVector<ImDrawChannel>
+	Size:     c.int,
+	Capacity: c.int,
+	Data:     ^DrawChannel,
+}
+
 Vector_DrawCmd :: struct { // Instantiation of ImVector<ImDrawCmd>
 	Size:     c.int,
 	Capacity: c.int,
@@ -1147,12 +1214,6 @@ Vector_DrawIdx :: struct { // Instantiation of ImVector<ImDrawIdx>
 	Size:     c.int,
 	Capacity: c.int,
 	Data:     ^DrawIdx,
-}
-
-Vector_DrawChannel :: struct { // Instantiation of ImVector<ImDrawChannel>
-	Size:     c.int,
-	Capacity: c.int,
-	Data:     ^DrawChannel,
 }
 
 Vector_DrawVert :: struct { // Instantiation of ImVector<ImDrawVert>
@@ -1173,10 +1234,10 @@ Vector_Vec4 :: struct { // Instantiation of ImVector<ImVec4>
 	Data:     ^Vec4,
 }
 
-Vector_TextureID :: struct { // Instantiation of ImVector<ImTextureID>
+Vector_TextureRef :: struct { // Instantiation of ImVector<ImTextureRef>
 	Size:     c.int,
 	Capacity: c.int,
-	Data:     ^TextureID,
+	Data:     ^TextureRef,
 }
 
 Vector_U8 :: struct { // Instantiation of ImVector<ImU8>
@@ -1191,10 +1252,22 @@ Vector_DrawListPtr :: struct { // Instantiation of ImVector<ImDrawList*>
 	Data:     ^^DrawList,
 }
 
+Vector_TextureRect :: struct { // Instantiation of ImVector<ImTextureRect>
+	Size:     c.int,
+	Capacity: c.int,
+	Data:     ^TextureRect,
+}
+
 Vector_U32 :: struct { // Instantiation of ImVector<ImU32>
 	Size:     c.int,
 	Capacity: c.int,
 	Data:     ^u32,
+}
+
+Vector_Wchar :: struct { // Instantiation of ImVector<ImWchar>
+	Size:     c.int,
+	Capacity: c.int,
+	Data:     ^Wchar,
 }
 
 Vector_FontPtr :: struct { // Instantiation of ImVector<ImFont*>
@@ -1203,16 +1276,16 @@ Vector_FontPtr :: struct { // Instantiation of ImVector<ImFont*>
 	Data:     ^^Font,
 }
 
-Vector_FontAtlasCustomRect :: struct { // Instantiation of ImVector<ImFontAtlasCustomRect>
-	Size:     c.int,
-	Capacity: c.int,
-	Data:     ^FontAtlasCustomRect,
-}
-
 Vector_FontConfig :: struct { // Instantiation of ImVector<ImFontConfig>
 	Size:     c.int,
 	Capacity: c.int,
 	Data:     ^FontConfig,
+}
+
+Vector_DrawListSharedDataPtr :: struct { // Instantiation of ImVector<ImDrawListSharedData*>
+	Size:     c.int,
+	Capacity: c.int,
+	Data:     ^^DrawListSharedData,
 }
 
 Vector_float :: struct { // Instantiation of ImVector<float>
@@ -1233,10 +1306,22 @@ Vector_FontGlyph :: struct { // Instantiation of ImVector<ImFontGlyph>
 	Data:     ^FontGlyph,
 }
 
+Vector_FontConfigPtr :: struct { // Instantiation of ImVector<ImFontConfig*>
+	Size:     c.int,
+	Capacity: c.int,
+	Data:     ^^FontConfig,
+}
+
 Vector_PlatformMonitor :: struct { // Instantiation of ImVector<ImGuiPlatformMonitor>
 	Size:     c.int,
 	Capacity: c.int,
 	Data:     ^PlatformMonitor,
+}
+
+Vector_TextureDataPtr :: struct { // Instantiation of ImVector<ImTextureData*>
+	Size:     c.int,
+	Capacity: c.int,
+	Data:     ^^TextureData,
 }
 
 Vector_ViewportPtr :: struct { // Instantiation of ImVector<ImGuiViewport*>
@@ -1246,57 +1331,69 @@ Vector_ViewportPtr :: struct { // Instantiation of ImVector<ImGuiViewport*>
 }
 
 Style :: struct {
-	Alpha:                            f32,  // Global alpha applies to everything in Dear ImGui.
-	DisabledAlpha:                    f32,  // Additional alpha multiplier applied by BeginDisabled(). Multiply over current value of Alpha.
-	WindowPadding:                    Vec2, // Padding within a window.
-	WindowRounding:                   f32,  // Radius of window corners rounding. Set to 0.0f to have rectangular windows. Large values tend to lead to variety of artifacts and are not recommended.
-	WindowBorderSize:                 f32,  // Thickness of border around windows. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
-	WindowBorderHoverPadding:         f32,  // Hit-testing extent outside/inside resizing border. Also extend determination of hovered window. Generally meaningfully larger than WindowBorderSize to make it easy to reach borders.
-	WindowMinSize:                    Vec2, // Minimum window size. This is a global setting. If you want to constrain individual windows, use SetNextWindowSizeConstraints().
-	WindowTitleAlign:                 Vec2, // Alignment for title bar text. Defaults to (0.0f,0.5f) for left-aligned,vertically centered.
-	WindowMenuButtonPosition:         Dir,  // Side of the collapsing/docking button in the title bar (None/Left/Right). Defaults to ImGuiDir_Left.
-	ChildRounding:                    f32,  // Radius of child window corners rounding. Set to 0.0f to have rectangular windows.
-	ChildBorderSize:                  f32,  // Thickness of border around child windows. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
-	PopupRounding:                    f32,  // Radius of popup window corners rounding. (Note that tooltip windows use WindowRounding)
-	PopupBorderSize:                  f32,  // Thickness of border around popup/tooltip windows. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
-	FramePadding:                     Vec2, // Padding within a framed rectangle (used by most widgets).
-	FrameRounding:                    f32,  // Radius of frame corners rounding. Set to 0.0f to have rectangular frame (used by most widgets).
-	FrameBorderSize:                  f32,  // Thickness of border around frames. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
-	ItemSpacing:                      Vec2, // Horizontal and vertical spacing between widgets/lines.
-	ItemInnerSpacing:                 Vec2, // Horizontal and vertical spacing between within elements of a composed widget (e.g. a slider and its label).
-	CellPadding:                      Vec2, // Padding within a table cell. Cellpadding.x is locked for entire table. CellPadding.y may be altered between different rows.
-	TouchExtraPadding:                Vec2, // Expand reactive bounding box for touch-based system where touch position is not accurate enough. Unfortunately we don't sort widgets so priority on overlap will always be given to the first widget. So don't grow this too much!
-	IndentSpacing:                    f32,  // Horizontal indentation when e.g. entering a tree node. Generally == (FontSize + FramePadding.x*2).
-	ColumnsMinSpacing:                f32,  // Minimum horizontal spacing between two columns. Preferably > (FramePadding.x + 1).
-	ScrollbarSize:                    f32,  // Width of the vertical scrollbar, Height of the horizontal scrollbar.
-	ScrollbarRounding:                f32,  // Radius of grab corners for scrollbar.
-	GrabMinSize:                      f32,  // Minimum width/height of a grab box for slider/scrollbar.
-	GrabRounding:                     f32,  // Radius of grabs corners rounding. Set to 0.0f to have rectangular slider grabs.
-	LogSliderDeadzone:                f32,  // The size in pixels of the dead-zone around zero on logarithmic sliders that cross zero.
-	ImageBorderSize:                  f32,  // Thickness of border around Image() calls.
-	TabRounding:                      f32,  // Radius of upper corners of a tab. Set to 0.0f to have rectangular tabs.
-	TabBorderSize:                    f32,  // Thickness of border around tabs.
-	TabCloseButtonMinWidthSelected:   f32,  // -1: always visible. 0.0f: visible when hovered. >0.0f: visible when hovered if minimum width.
-	TabCloseButtonMinWidthUnselected: f32,  // -1: always visible. 0.0f: visible when hovered. >0.0f: visible when hovered if minimum width. FLT_MAX: never show close button when unselected.
-	TabBarBorderSize:                 f32,  // Thickness of tab-bar separator, which takes on the tab active color to denote focus.
-	TabBarOverlineSize:               f32,  // Thickness of tab-bar overline, which highlights the selected tab-bar.
-	TableAngledHeadersAngle:          f32,  // Angle of angled headers (supported values range from -50.0f degrees to +50.0f degrees).
-	TableAngledHeadersTextAlign:      Vec2, // Alignment of angled headers within the cell
-	ColorButtonPosition:              Dir,  // Side of the color button in the ColorEdit4 widget (left/right). Defaults to ImGuiDir_Right.
-	ButtonTextAlign:                  Vec2, // Alignment of button text when button is larger than text. Defaults to (0.5f, 0.5f) (centered).
-	SelectableTextAlign:              Vec2, // Alignment of selectable text. Defaults to (0.0f, 0.0f) (top-left aligned). It's generally important to keep this left-aligned if you want to lay multiple items on a same line.
-	SeparatorTextBorderSize:          f32,  // Thickness of border in SeparatorText()
-	SeparatorTextAlign:               Vec2, // Alignment of text within the separator. Defaults to (0.0f, 0.5f) (left aligned, center).
-	SeparatorTextPadding:             Vec2, // Horizontal offset of text from each edge of the separator + spacing on other axis. Generally small values. .y is recommended to be == FramePadding.y.
-	DisplayWindowPadding:             Vec2, // Apply to regular windows: amount which we enforce to keep visible when moving near edges of your screen.
-	DisplaySafeAreaPadding:           Vec2, // Apply to every windows, menus, popups, tooltips: amount where we avoid displaying contents. Adjust if you cannot see the edges of your screen (e.g. on a TV where scaling has not been configured).
-	DockingSeparatorSize:             f32,  // Thickness of resizing border between docked windows
-	MouseCursorScale:                 f32,  // Scale software rendered mouse cursor (when io.MouseDrawCursor is enabled). We apply per-monitor DPI scaling over this scale. May be removed later.
-	AntiAliasedLines:                 bool, // Enable anti-aliased lines/borders. Disable if you are really tight on CPU/GPU. Latched at the beginning of the frame (copied to ImDrawList).
-	AntiAliasedLinesUseTex:           bool, // Enable anti-aliased lines/borders using textures where possible. Require backend to render with bilinear filtering (NOT point/nearest filtering). Latched at the beginning of the frame (copied to ImDrawList).
-	AntiAliasedFill:                  bool, // Enable anti-aliased edges around filled shapes (rounded rectangles, circles, etc.). Disable if you are really tight on CPU/GPU. Latched at the beginning of the frame (copied to ImDrawList).
-	CurveTessellationTol:             f32,  // Tessellation tolerance when using PathBezierCurveTo() without a specific number of segments. Decrease for highly tessellated curves (higher quality, more polygons), increase to reduce quality.
-	CircleTessellationMaxError:       f32,  // Maximum error (in pixels) allowed when using AddCircle()/AddCircleFilled() or drawing rounded corner rectangles with no explicit segment count specified. Decrease for higher quality but more geometry.
+	// Font scaling
+	// - recap: ImGui::GetFontSize() == FontSizeBase * (FontScaleMain * FontScaleDpi * other_scaling_factors)
+	FontSizeBase:                     f32,           // Current base font size before external global factors are applied. Use PushFont(NULL, size) to modify. Use ImGui::GetFontSize() to obtain scaled value.
+	FontScaleMain:                    f32,           // Main global scale factor. May be set by application once, or exposed to end-user.
+	FontScaleDpi:                     f32,           // Additional global scale factor from viewport/monitor contents scale. When io.ConfigDpiScaleFonts is enabled, this is automatically overwritten when changing monitor DPI.
+	Alpha:                            f32,           // Global alpha applies to everything in Dear ImGui.
+	DisabledAlpha:                    f32,           // Additional alpha multiplier applied by BeginDisabled(). Multiply over current value of Alpha.
+	WindowPadding:                    Vec2,          // Padding within a window.
+	WindowRounding:                   f32,           // Radius of window corners rounding. Set to 0.0f to have rectangular windows. Large values tend to lead to variety of artifacts and are not recommended.
+	WindowBorderSize:                 f32,           // Thickness of border around windows. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
+	WindowBorderHoverPadding:         f32,           // Hit-testing extent outside/inside resizing border. Also extend determination of hovered window. Generally meaningfully larger than WindowBorderSize to make it easy to reach borders.
+	WindowMinSize:                    Vec2,          // Minimum window size. This is a global setting. If you want to constrain individual windows, use SetNextWindowSizeConstraints().
+	WindowTitleAlign:                 Vec2,          // Alignment for title bar text. Defaults to (0.0f,0.5f) for left-aligned,vertically centered.
+	WindowMenuButtonPosition:         Dir,           // Side of the collapsing/docking button in the title bar (None/Left/Right). Defaults to ImGuiDir_Left.
+	ChildRounding:                    f32,           // Radius of child window corners rounding. Set to 0.0f to have rectangular windows.
+	ChildBorderSize:                  f32,           // Thickness of border around child windows. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
+	PopupRounding:                    f32,           // Radius of popup window corners rounding. (Note that tooltip windows use WindowRounding)
+	PopupBorderSize:                  f32,           // Thickness of border around popup/tooltip windows. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
+	FramePadding:                     Vec2,          // Padding within a framed rectangle (used by most widgets).
+	FrameRounding:                    f32,           // Radius of frame corners rounding. Set to 0.0f to have rectangular frame (used by most widgets).
+	FrameBorderSize:                  f32,           // Thickness of border around frames. Generally set to 0.0f or 1.0f. (Other values are not well tested and more CPU/GPU costly).
+	ItemSpacing:                      Vec2,          // Horizontal and vertical spacing between widgets/lines.
+	ItemInnerSpacing:                 Vec2,          // Horizontal and vertical spacing between within elements of a composed widget (e.g. a slider and its label).
+	CellPadding:                      Vec2,          // Padding within a table cell. Cellpadding.x is locked for entire table. CellPadding.y may be altered between different rows.
+	TouchExtraPadding:                Vec2,          // Expand reactive bounding box for touch-based system where touch position is not accurate enough. Unfortunately we don't sort widgets so priority on overlap will always be given to the first widget. So don't grow this too much!
+	IndentSpacing:                    f32,           // Horizontal indentation when e.g. entering a tree node. Generally == (FontSize + FramePadding.x*2).
+	ColumnsMinSpacing:                f32,           // Minimum horizontal spacing between two columns. Preferably > (FramePadding.x + 1).
+	ScrollbarSize:                    f32,           // Width of the vertical scrollbar, Height of the horizontal scrollbar.
+	ScrollbarRounding:                f32,           // Radius of grab corners for scrollbar.
+	ScrollbarPadding:                 f32,           // Padding of scrollbar grab within its frame (same for both axises).
+	GrabMinSize:                      f32,           // Minimum width/height of a grab box for slider/scrollbar.
+	GrabRounding:                     f32,           // Radius of grabs corners rounding. Set to 0.0f to have rectangular slider grabs.
+	LogSliderDeadzone:                f32,           // The size in pixels of the dead-zone around zero on logarithmic sliders that cross zero.
+	ImageBorderSize:                  f32,           // Thickness of border around Image() calls.
+	TabRounding:                      f32,           // Radius of upper corners of a tab. Set to 0.0f to have rectangular tabs.
+	TabBorderSize:                    f32,           // Thickness of border around tabs.
+	TabMinWidthBase:                  f32,           // Minimum tab width, to make tabs larger than their contents. TabBar buttons are not affected.
+	TabMinWidthShrink:                f32,           // Minimum tab width after shrinking, when using ImGuiTabBarFlags_FittingPolicyMixed policy.
+	TabCloseButtonMinWidthSelected:   f32,           // -1: always visible. 0.0f: visible when hovered. >0.0f: visible when hovered if minimum width.
+	TabCloseButtonMinWidthUnselected: f32,           // -1: always visible. 0.0f: visible when hovered. >0.0f: visible when hovered if minimum width. FLT_MAX: never show close button when unselected.
+	TabBarBorderSize:                 f32,           // Thickness of tab-bar separator, which takes on the tab active color to denote focus.
+	TabBarOverlineSize:               f32,           // Thickness of tab-bar overline, which highlights the selected tab-bar.
+	TableAngledHeadersAngle:          f32,           // Angle of angled headers (supported values range from -50.0f degrees to +50.0f degrees).
+	TableAngledHeadersTextAlign:      Vec2,          // Alignment of angled headers within the cell
+	TreeLinesFlags:                   TreeNodeFlags, // Default way to draw lines connecting TreeNode hierarchy. ImGuiTreeNodeFlags_DrawLinesNone or ImGuiTreeNodeFlags_DrawLinesFull or ImGuiTreeNodeFlags_DrawLinesToNodes.
+	TreeLinesSize:                    f32,           // Thickness of outlines when using ImGuiTreeNodeFlags_DrawLines.
+	TreeLinesRounding:                f32,           // Radius of lines connecting child nodes to the vertical line.
+	ColorButtonPosition:              Dir,           // Side of the color button in the ColorEdit4 widget (left/right). Defaults to ImGuiDir_Right.
+	ButtonTextAlign:                  Vec2,          // Alignment of button text when button is larger than text. Defaults to (0.5f, 0.5f) (centered).
+	SelectableTextAlign:              Vec2,          // Alignment of selectable text. Defaults to (0.0f, 0.0f) (top-left aligned). It's generally important to keep this left-aligned if you want to lay multiple items on a same line.
+	SeparatorTextBorderSize:          f32,           // Thickness of border in SeparatorText()
+	SeparatorTextAlign:               Vec2,          // Alignment of text within the separator. Defaults to (0.0f, 0.5f) (left aligned, center).
+	SeparatorTextPadding:             Vec2,          // Horizontal offset of text from each edge of the separator + spacing on other axis. Generally small values. .y is recommended to be == FramePadding.y.
+	DisplayWindowPadding:             Vec2,          // Apply to regular windows: amount which we enforce to keep visible when moving near edges of your screen.
+	DisplaySafeAreaPadding:           Vec2,          // Apply to every windows, menus, popups, tooltips: amount where we avoid displaying contents. Adjust if you cannot see the edges of your screen (e.g. on a TV where scaling has not been configured).
+	DockingNodeHasCloseButton:        bool,          // Docking node has their own CloseButton() to close all docked windows.
+	DockingSeparatorSize:             f32,           // Thickness of resizing border between docked windows
+	MouseCursorScale:                 f32,           // Scale software rendered mouse cursor (when io.MouseDrawCursor is enabled). We apply per-monitor DPI scaling over this scale. May be removed later.
+	AntiAliasedLines:                 bool,          // Enable anti-aliased lines/borders. Disable if you are really tight on CPU/GPU. Latched at the beginning of the frame (copied to ImDrawList).
+	AntiAliasedLinesUseTex:           bool,          // Enable anti-aliased lines/borders using textures where possible. Require backend to render with bilinear filtering (NOT point/nearest filtering). Latched at the beginning of the frame (copied to ImDrawList).
+	AntiAliasedFill:                  bool,          // Enable anti-aliased edges around filled shapes (rounded rectangles, circles, etc.). Disable if you are really tight on CPU/GPU. Latched at the beginning of the frame (copied to ImDrawList).
+	CurveTessellationTol:             f32,           // Tessellation tolerance when using PathBezierCurveTo() without a specific number of segments. Decrease for highly tessellated curves (higher quality, more polygons), increase to reduce quality.
+	CircleTessellationMaxError:       f32,           // Maximum error (in pixels) allowed when using AddCircle()/AddCircleFilled() or drawing rounded corner rectangles with no explicit segment count specified. Decrease for higher quality but more geometry.
 	// Colors
 	Colors: [Col.COUNT]Vec4,
 	// Behaviors
@@ -1306,6 +1403,9 @@ Style :: struct {
 	HoverDelayNormal:          f32,          // Delay for IsItemHovered(ImGuiHoveredFlags_DelayNormal). "
 	HoverFlagsForTooltipMouse: HoveredFlags, // Default flags when using IsItemHovered(ImGuiHoveredFlags_ForTooltip) or BeginItemTooltip()/SetItemTooltip() while using mouse.
 	HoverFlagsForTooltipNav:   HoveredFlags, // Default flags when using IsItemHovered(ImGuiHoveredFlags_ForTooltip) or BeginItemTooltip()/SetItemTooltip() while using keyboard/gamepad.
+	// [Internal]
+	_MainScale:             f32, // FIXME-WIP: Reference scale, as applied by ScaleAllSizes().
+	_NextFrameFontSizeBase: f32, // FIXME: Temporary hack until we finish remaining work.
 }
 
 // [Internal] Storage used by IsKeyDown(), IsKeyPressed() etc functions.
@@ -1318,20 +1418,19 @@ KeyData :: struct {
 }
 
 IO :: struct {
-	ConfigFlags:   ConfigFlags,  // = 0              // See ImGuiConfigFlags_ enum. Set by user/application. Keyboard/Gamepad navigation options, etc.
-	BackendFlags:  BackendFlags, // = 0              // See ImGuiBackendFlags_ enum. Set by backend (imgui_impl_xxx files or custom backend) to communicate features supported by the backend.
-	DisplaySize:   Vec2,         // <unset>          // Main display size, in pixels (generally == GetMainViewport()->Size). May change every frame.
-	DeltaTime:     f32,          // = 1.0f/60.0f     // Time elapsed since last frame, in seconds. May change every frame.
-	IniSavingRate: f32,          // = 5.0f           // Minimum time between saving positions/sizes to .ini file, in seconds.
-	IniFilename:   cstring,      // = "imgui.ini"    // Path to .ini file (important: default "imgui.ini" is relative to current working dir!). Set NULL to disable automatic .ini loading/saving or if you want to manually call LoadIniSettingsXXX() / SaveIniSettingsXXX() functions.
-	LogFilename:   cstring,      // = "imgui_log.txt"// Path to .log file (default parameter to ImGui::LogToFile when no file is specified).
-	UserData:      rawptr,       // = NULL           // Store your own data.
+	ConfigFlags:             ConfigFlags,  // = 0              // See ImGuiConfigFlags_ enum. Set by user/application. Keyboard/Gamepad navigation options, etc.
+	BackendFlags:            BackendFlags, // = 0              // See ImGuiBackendFlags_ enum. Set by backend (imgui_impl_xxx files or custom backend) to communicate features supported by the backend.
+	DisplaySize:             Vec2,         // <unset>          // Main display size, in pixels (== GetMainViewport()->Size). May change every frame.
+	DisplayFramebufferScale: Vec2,         // = (1, 1)         // Main display density. For retina display where window coordinates are different from framebuffer coordinates. This will affect font density + will end up in ImDrawData::FramebufferScale.
+	DeltaTime:               f32,          // = 1.0f/60.0f     // Time elapsed since last frame, in seconds. May change every frame.
+	IniSavingRate:           f32,          // = 5.0f           // Minimum time between saving positions/sizes to .ini file, in seconds.
+	IniFilename:             cstring,      // = "imgui.ini"    // Path to .ini file (important: default "imgui.ini" is relative to current working dir!). Set NULL to disable automatic .ini loading/saving or if you want to manually call LoadIniSettingsXXX() / SaveIniSettingsXXX() functions.
+	LogFilename:             cstring,      // = "imgui_log.txt"// Path to .log file (default parameter to ImGui::LogToFile when no file is specified).
+	UserData:                rawptr,       // = NULL           // Store your own data.
 	// Font system
-	Fonts:                   ^FontAtlas, // <auto>           // Font atlas: load, rasterize and pack one or more fonts into a single texture.
-	FontGlobalScale:         f32,        // = 1.0f           // Global scale all fonts
-	FontAllowUserScaling:    bool,       // = false          // [OBSOLETE] Allow user scaling text of individual window with CTRL+Wheel.
-	FontDefault:             ^Font,      // = NULL           // Font to use on NewFrame(). Use NULL to uses Fonts->Fonts[0].
-	DisplayFramebufferScale: Vec2,       // = (1, 1)         // For retina display or other situations where window coordinates are different from framebuffer coordinates. This generally ends up in ImDrawData::FramebufferScale.
+	Fonts:                ^FontAtlas, // <auto>           // Font atlas: load, rasterize and pack one or more fonts into a single texture.
+	FontDefault:          ^Font,      // = NULL           // Font to use on NewFrame(). Use NULL to uses Fonts->Fonts[0].
+	FontAllowUserScaling: bool,       // = false          // [OBSOLETE] Allow user scaling text of individual window with CTRL+Wheel.
 	// Keyboard/Gamepad Navigation options
 	ConfigNavSwapGamepadButtons:     bool, // = false          // Swap Activate<>Cancel (A<>B) buttons, matching typical "Nintendo/Japanese style" gamepad layout.
 	ConfigNavMoveSetMousePos:        bool, // = false          // Directional/tabbing navigation teleports the mouse cursor. May be useful on TV/console systems where moving a virtual mouse is difficult. Will update io.MousePos and set io.WantSetMousePos=true.
@@ -1346,10 +1445,15 @@ IO :: struct {
 	ConfigDockingAlwaysTabBar:       bool, // = false          // [BETA] [FIXME: This currently creates regression with auto-sizing and general overhead] Make every single floating window display within a docking node.
 	ConfigDockingTransparentPayload: bool, // = false          // [BETA] Make window or viewport transparent when docking and only display docking boxes on the target viewport. Useful if rendering of multiple viewport cannot be synced. Best used with ConfigViewportsNoAutoMerge.
 	// Viewport options (when ImGuiConfigFlags_ViewportsEnable is set)
-	ConfigViewportsNoAutoMerge:     bool, // = false;         // Set to make all floating imgui windows always create their own viewport. Otherwise, they are merged into the main host viewports when overlapping it. May also set ImGuiViewportFlags_NoAutoMerge on individual viewport.
-	ConfigViewportsNoTaskBarIcon:   bool, // = false          // Disable default OS task bar icon flag for secondary viewports. When a viewport doesn't want a task bar icon, ImGuiViewportFlags_NoTaskBarIcon will be set on it.
-	ConfigViewportsNoDecoration:    bool, // = true           // Disable default OS window decoration flag for secondary viewports. When a viewport doesn't want window decorations, ImGuiViewportFlags_NoDecoration will be set on it. Enabling decoration can create subsequent issues at OS levels (e.g. minimum window size).
-	ConfigViewportsNoDefaultParent: bool, // = false          // Disable default OS parenting to main viewport for secondary viewports. By default, viewports are marked with ParentViewportId = <main_viewport>, expecting the platform backend to setup a parent/child relationship between the OS windows (some backend may ignore this). Set to true if you want the default to be 0, then all viewports will be top-level OS windows.
+	ConfigViewportsNoAutoMerge:                 bool, // = false;         // Set to make all floating imgui windows always create their own viewport. Otherwise, they are merged into the main host viewports when overlapping it. May also set ImGuiViewportFlags_NoAutoMerge on individual viewport.
+	ConfigViewportsNoTaskBarIcon:               bool, // = false          // Disable default OS task bar icon flag for secondary viewports. When a viewport doesn't want a task bar icon, ImGuiViewportFlags_NoTaskBarIcon will be set on it.
+	ConfigViewportsNoDecoration:                bool, // = true           // Disable default OS window decoration flag for secondary viewports. When a viewport doesn't want window decorations, ImGuiViewportFlags_NoDecoration will be set on it. Enabling decoration can create subsequent issues at OS levels (e.g. minimum window size).
+	ConfigViewportsNoDefaultParent:             bool, // = true           // When false: set secondary viewports' ParentViewportId to main viewport ID by default. Expects the platform backend to setup a parent/child relationship between the OS windows based on this value. Some backend may ignore this. Set to true if you want viewports to automatically be parent of main viewport, otherwise all viewports will be top-level OS windows.
+	ConfigViewportsPlatformFocusSetsImGuiFocus: bool, //= true // When a platform window is focused (e.g. using Alt+Tab, clicking Platform Title Bar), apply corresponding focus on imgui windows (may clear focus/active id from imgui windows location in other platform windows). In principle this is better enabled but we provide an opt-out, because some Linux window managers tend to eagerly focus windows (e.g. on mouse hover, or even a simple window pos/size change).
+	// DPI/Scaling options
+	// This may keep evolving during 1.92.x releases. Expect some turbulence.
+	ConfigDpiScaleFonts:     bool, // = false          // [EXPERIMENTAL] Automatically overwrite style.FontScaleDpi when Monitor DPI changes. This will scale fonts but _NOT_ scale sizes/padding for now.
+	ConfigDpiScaleViewports: bool, // = false          // [EXPERIMENTAL] Scale Dear ImGui and Platform Windows when Monitor DPI changes.
 	// Miscellaneous options
 	// (you can visualize and interact with all options in 'Demo->Configuration')
 	MouseDrawCursor:                    bool, // = false          // Request ImGui to draw a mouse cursor for you (if you are on a platform without a mouse cursor). Cannot be easily renamed to 'io.ConfigXXX' because this is frequently used by backend implementations.
@@ -1391,7 +1495,7 @@ IO :: struct {
 	// Option to enable various debug tools showing buttons that will call the IM_DEBUG_BREAK() macro.
 	// - The Item Picker tool will be available regardless of this being enabled, in order to maximize its discoverability.
 	// - Requires a debugger being attached, otherwise IM_DEBUG_BREAK() options will appear to crash your application.
-	//   e.g. io.ConfigDebugIsDebuggerPresent = ::IsDebuggerPresent() on Win32, or refer to ImOsIsDebuggerPresent() imgui_test_engine/imgui_te_utils.cpp for a Unix compatible version).
+	//   e.g. io.ConfigDebugIsDebuggerPresent = ::IsDebuggerPresent() on Win32, or refer to ImOsIsDebuggerPresent() imgui_test_engine/imgui_te_utils.cpp for a Unix compatible version.
 	ConfigDebugIsDebuggerPresent: bool, // = false          // Enable various tools calling IM_DEBUG_BREAK().
 	// Tools to detect code submitting items with conflicting/duplicate IDs
 	// - Code should use PushID()/PopID() in loops, or append "##xx" to same-label identifiers.
@@ -1441,39 +1545,42 @@ IO :: struct {
 	MouseWheelH:          f32,         // Mouse wheel Horizontal. >0 scrolls Left, <0 scrolls Right. Most users don't have a mouse with a horizontal wheel, may not be filled by all backends.
 	MouseSource:          MouseSource, // Mouse actual input peripheral (Mouse/TouchScreen/Pen).
 	MouseHoveredViewport: ID,          // (Optional) Modify using io.AddMouseViewportEvent(). With multi-viewports: viewport the OS mouse is hovering. If possible _IGNORING_ viewports with the ImGuiViewportFlags_NoInputs flag is much better (few backends can handle that). Set io.BackendFlags |= ImGuiBackendFlags_HasMouseHoveredViewport if you can provide this info. If you don't imgui will infer the value using the rectangles and last focused time of the viewports it knows about (ignoring other OS windows).
-	KeyCtrl:              bool,        // Keyboard modifier down: Control
+	KeyCtrl:              bool,        // Keyboard modifier down: Ctrl (non-macOS), Cmd (macOS)
 	KeyShift:             bool,        // Keyboard modifier down: Shift
 	KeyAlt:               bool,        // Keyboard modifier down: Alt
-	KeySuper:             bool,        // Keyboard modifier down: Cmd/Super/Windows
+	KeySuper:             bool,        // Keyboard modifier down: Windows/Super (non-macOS), Ctrl (macOS)
 	// Other state maintained from data above + IO function calls
-	KeyMods:                          KeyChord,                                    // Key mods flags (any of ImGuiMod_Ctrl/ImGuiMod_Shift/ImGuiMod_Alt/ImGuiMod_Super flags, same as io.KeyCtrl/KeyShift/KeyAlt/KeySuper but merged into flags. Read-only, updated by NewFrame()
-	KeysData:                         [Key.NamedKey_COUNT]KeyData,                 // Key state for all known keys. Use IsKeyXXX() functions to access this.
-	WantCaptureMouseUnlessPopupClose: bool,                                        // Alternative to WantCaptureMouse: (WantCaptureMouse == true && WantCaptureMouseUnlessPopupClose == false) when a click over void is expected to close a popup.
-	MousePosPrev:                     Vec2,                                        // Previous mouse position (note that MouseDelta is not necessary == MousePos-MousePosPrev, in case either position is invalid)
-	MouseClickedPos:                  [5]Vec2,                                     // Position at time of clicking
-	MouseClickedTime:                 [5]f64,                                      // Time of last click (used to figure out double-click)
-	MouseClicked:                     [5]bool,                                     // Mouse button went from !Down to Down (same as MouseClickedCount[x] != 0)
-	MouseDoubleClicked:               [5]bool,                                     // Has mouse button been double-clicked? (same as MouseClickedCount[x] == 2)
-	MouseClickedCount:                [5]u16,                                      // == 0 (not clicked), == 1 (same as MouseClicked[]), == 2 (double-clicked), == 3 (triple-clicked) etc. when going from !Down to Down
-	MouseClickedLastCount:            [5]u16,                                      // Count successive number of clicks. Stays valid after mouse release. Reset after another click is done.
-	MouseReleased:                    [5]bool,                                     // Mouse button went from Down to !Down
-	MouseReleasedTime:                [5]f64,                                      // Time of last released (rarely used! but useful to handle delayed single-click when trying to disambiguate them from double-click).
-	MouseDownOwned:                   [5]bool,                                     // Track if button was clicked inside a dear imgui window or over void blocked by a popup. We don't request mouse capture from the application if click started outside ImGui bounds.
-	MouseDownOwnedUnlessPopupClose:   [5]bool,                                     // Track if button was clicked inside a dear imgui window.
-	MouseWheelRequestAxisSwap:        bool,                                        // On a non-Mac system, holding SHIFT requests WheelY to perform the equivalent of a WheelX event. On a Mac system this is already enforced by the system.
-	MouseCtrlLeftAsRightClick:        bool,                                        // (OSX) Set to true when the current click was a Ctrl+click that spawned a simulated right click
-	MouseDownDuration:                [5]f32,                                      // Duration the mouse button has been down (0.0f == just clicked)
-	MouseDownDurationPrev:            [5]f32,                                      // Previous time the mouse button has been down
-	MouseDragMaxDistanceAbs:          [5]Vec2,                                     // Maximum distance, absolute, on each axis, of how much mouse has traveled from the clicking point
-	MouseDragMaxDistanceSqr:          [5]f32,                                      // Squared maximum distance of how much mouse has traveled from the clicking point (used for moving thresholds)
-	PenPressure:                      f32,                                         // Touch/Pen pressure (0.0f to 1.0f, should be >0.0f only when MouseDown[0] == true). Helper storage currently unused by Dear ImGui.
-	AppFocusLost:                     bool,                                        // Only modify via AddFocusEvent()
-	AppAcceptingEvents:               bool,                                        // Only modify via SetAppAcceptingEvents()
-	InputQueueSurrogate:              Wchar16,                                     // For AddInputCharacterUTF16()
-	InputQueueCharacters:             Vector_Wchar,                                // Queue of _characters_ input (obtained by platform backend). Fill using AddInputCharacter() helper.
-	GetClipboardTextFn:               proc "c" (user_data: rawptr) -> cstring,
-	SetClipboardTextFn:               proc "c" (user_data: rawptr, text: cstring),
-	ClipboardUserData:                rawptr,
+	KeyMods:                          KeyChord,                    // Key mods flags (any of ImGuiMod_Ctrl/ImGuiMod_Shift/ImGuiMod_Alt/ImGuiMod_Super flags, same as io.KeyCtrl/KeyShift/KeyAlt/KeySuper but merged into flags). Read-only, updated by NewFrame()
+	KeysData:                         [Key.NamedKey_COUNT]KeyData, // Key state for all known keys. MUST use 'key - ImGuiKey_NamedKey_BEGIN' as index. Use IsKeyXXX() functions to access this.
+	WantCaptureMouseUnlessPopupClose: bool,                        // Alternative to WantCaptureMouse: (WantCaptureMouse == true && WantCaptureMouseUnlessPopupClose == false) when a click over void is expected to close a popup.
+	MousePosPrev:                     Vec2,                        // Previous mouse position (note that MouseDelta is not necessary == MousePos-MousePosPrev, in case either position is invalid)
+	MouseClickedPos:                  [5]Vec2,                     // Position at time of clicking
+	MouseClickedTime:                 [5]f64,                      // Time of last click (used to figure out double-click)
+	MouseClicked:                     [5]bool,                     // Mouse button went from !Down to Down (same as MouseClickedCount[x] != 0)
+	MouseDoubleClicked:               [5]bool,                     // Has mouse button been double-clicked? (same as MouseClickedCount[x] == 2)
+	MouseClickedCount:                [5]u16,                      // == 0 (not clicked), == 1 (same as MouseClicked[]), == 2 (double-clicked), == 3 (triple-clicked) etc. when going from !Down to Down
+	MouseClickedLastCount:            [5]u16,                      // Count successive number of clicks. Stays valid after mouse release. Reset after another click is done.
+	MouseReleased:                    [5]bool,                     // Mouse button went from Down to !Down
+	MouseReleasedTime:                [5]f64,                      // Time of last released (rarely used! but useful to handle delayed single-click when trying to disambiguate them from double-click).
+	MouseDownOwned:                   [5]bool,                     // Track if button was clicked inside a dear imgui window or over void blocked by a popup. We don't request mouse capture from the application if click started outside ImGui bounds.
+	MouseDownOwnedUnlessPopupClose:   [5]bool,                     // Track if button was clicked inside a dear imgui window.
+	MouseWheelRequestAxisSwap:        bool,                        // On a non-Mac system, holding SHIFT requests WheelY to perform the equivalent of a WheelX event. On a Mac system this is already enforced by the system.
+	MouseCtrlLeftAsRightClick:        bool,                        // (OSX) Set to true when the current click was a Ctrl+click that spawned a simulated right click
+	MouseDownDuration:                [5]f32,                      // Duration the mouse button has been down (0.0f == just clicked)
+	MouseDownDurationPrev:            [5]f32,                      // Previous time the mouse button has been down
+	MouseDragMaxDistanceAbs:          [5]Vec2,                     // Maximum distance, absolute, on each axis, of how much mouse has traveled from the clicking point
+	MouseDragMaxDistanceSqr:          [5]f32,                      // Squared maximum distance of how much mouse has traveled from the clicking point (used for moving thresholds)
+	PenPressure:                      f32,                         // Touch/Pen pressure (0.0f to 1.0f, should be >0.0f only when MouseDown[0] == true). Helper storage currently unused by Dear ImGui.
+	AppFocusLost:                     bool,                        // Only modify via AddFocusEvent()
+	AppAcceptingEvents:               bool,                        // Only modify via SetAppAcceptingEvents()
+	InputQueueSurrogate:              Wchar16,                     // For AddInputCharacterUTF16()
+	InputQueueCharacters:             Vector_Wchar,                // Queue of _characters_ input (obtained by platform backend). Fill using AddInputCharacter() helper.
+	FontGlobalScale:                  f32,                         // Moved io.FontGlobalScale to style.FontScaleMain in 1.92 (June 2025)
+	// Legacy: before 1.91.1, clipboard functions were stored in ImGuiIO instead of ImGuiPlatformIO.
+	// As this is will affect all users of custom engines/backends, we are providing proper legacy redirection (will obsolete).
+	GetClipboardTextFn: proc "c" (user_data: rawptr) -> cstring,
+	SetClipboardTextFn: proc "c" (user_data: rawptr, text: cstring),
+	ClipboardUserData:  rawptr,
 }
 
 // Shared state of InputText(), passed as an argument to your callback when a ImGuiInputTextFlags_Callback* flag is used.
@@ -1499,10 +1606,10 @@ InputTextCallbackData :: struct {
 	EventKey:       Key,     // Key pressed (Up/Down/TAB)            // Read-only    // [Completion,History]
 	Buf:            cstring, // Text buffer                          // Read-write   // [Resize] Can replace pointer / [Completion,History,Always] Only write to pointed data, don't replace the actual pointer!
 	BufTextLen:     c.int,   // Text length (in bytes)               // Read-write   // [Resize,Completion,History,Always] Exclude zero-terminator storage. In C land: == strlen(some_text), in C++ land: string.length()
-	BufSize:        c.int,   // Buffer size (in bytes) = capacity+1  // Read-only    // [Resize,Completion,History,Always] Include zero-terminator storage. In C land == ARRAYSIZE(my_char_array), in C++ land: string.capacity()+1
+	BufSize:        c.int,   // Buffer size (in bytes) = capacity+1  // Read-only    // [Resize,Completion,History,Always] Include zero-terminator storage. In C land: == ARRAYSIZE(my_char_array), in C++ land: string.capacity()+1
 	BufDirty:       bool,    // Set if you modify Buf/BufTextLen!    // Write        // [Completion,History,Always]
 	CursorPos:      c.int,   //                                      // Read-write   // [Completion,History,Always]
-	SelectionStart: c.int,   //                                      // Read-write   // [Completion,History,Always] == to SelectionEnd when no selection)
+	SelectionStart: c.int,   //                                      // Read-write   // [Completion,History,Always] == to SelectionEnd when no selection
 	SelectionEnd:   c.int,   //                                      // Read-write   // [Completion,History,Always]
 }
 
@@ -1557,7 +1664,7 @@ TextFilter_ImGuiTextRange :: struct {
 // Helper: Parse and apply text filters. In format "aaaaa[,bbbb][,ccccc]"
 TextFilter :: struct {
 	InputBuf:  [256]c.char,
-	Filters:   Vector_TextFilter_ImGuiTextRange,
+	Filters:   Vector_TextRange,
 	CountGrep: c.int,
 }
 
@@ -1613,14 +1720,15 @@ Storage :: struct {
 // - User code submit visible elements.
 // - The clipper also handles various subtleties related to keyboard/gamepad navigation, wrapping etc.
 ListClipper :: struct {
-	Ctx:              ^Context, // Parent UI context
-	DisplayStart:     c.int,    // First item to display, updated by each call to Step()
-	DisplayEnd:       c.int,    // End of items to display (exclusive)
-	ItemsCount:       c.int,    // [Internal] Number of items
-	ItemsHeight:      f32,      // [Internal] Height of item after a first step and item submission can calculate it
-	StartPosY:        f32,      // [Internal] Cursor position at the time of Begin() or after table frozen rows are all processed
-	StartSeekOffsetY: f64,      // [Internal] Account for frozen rows in a table and initial loss of precision in very large windows.
-	TempData:         rawptr,   // [Internal] Internal data
+	Ctx:              ^Context,         // Parent UI context
+	DisplayStart:     c.int,            // First item to display, updated by each call to Step()
+	DisplayEnd:       c.int,            // End of items to display (exclusive)
+	ItemsCount:       c.int,            // [Internal] Number of items
+	ItemsHeight:      f32,              // [Internal] Height of item after a first step and item submission can calculate it
+	StartPosY:        f64,              // [Internal] Cursor position at the time of Begin() or after table frozen rows are all processed
+	StartSeekOffsetY: f64,              // [Internal] Account for frozen rows in a table and initial loss of precision in very large windows.
+	TempData:         rawptr,           // [Internal] Internal data
+	Flags:            ListClipperFlags, // [Internal] Flags, currently not yet well exposed.
 }
 
 // Helper: ImColor() implicitly converts colors to either ImU32 (packed 4x1 byte) or ImVec4 (4x1 float)
@@ -1694,10 +1802,10 @@ SelectionExternalStorage :: struct {
 // - VtxOffset: When 'io.BackendFlags & ImGuiBackendFlags_RendererHasVtxOffset' is enabled,
 //   this fields allow us to render meshes larger than 64K vertices while keeping 16-bit indices.
 //   Backends made for <1.71. will typically ignore the VtxOffset fields.
-// - The ClipRect/TextureId/VtxOffset fields must be contiguous as we memcmp() them together (this is asserted for).
+// - The ClipRect/TexRef/VtxOffset fields must be contiguous as we memcmp() them together (this is asserted for).
 DrawCmd :: struct {
 	ClipRect:               Vec4,         // 4*4  // Clipping rectangle (x1, y1, x2, y2). Subtract ImDrawData->DisplayPos to get clipping rectangle in "viewport" coordinates
-	TextureId:              TextureID,    // 4-8  // User-provided texture ID. Set by user in ImfontAtlas::SetTexID() for fonts or passed to Image*() functions. Ignore if never using images or multiple fonts atlas.
+	TexRef:                 TextureRef,   // 16   // Reference to a font/texture atlas (where backend called ImTextureData::SetTexID()) or to a user-provided texture ID (via e.g. ImGui::Image() calls). Both will lead to a ImTextureID value.
 	VtxOffset:              c.uint,       // 4    // Start offset in vertex buffer. ImGuiBackendFlags_RendererHasVtxOffset: always 0, otherwise may be >0 to support meshes larger than 64K vertices with 16-bit indices.
 	IdxOffset:              c.uint,       // 4    // Start offset in index buffer.
 	ElemCount:              c.uint,       // 4    // Number of indices (multiple of 3) to be rendered as triangles. Vertices are stored in the callee ImDrawList's vtx_buffer[] array, indices in idx_buffer[].
@@ -1716,7 +1824,7 @@ DrawVert :: struct {
 // [Internal] For use by ImDrawList
 DrawCmdHeader :: struct {
 	ClipRect:  Vec4,
-	TextureId: TextureID,
+	TexRef:    TextureRef,
 	VtxOffset: c.uint,
 }
 
@@ -1758,7 +1866,7 @@ DrawList :: struct {
 	_CmdHeader:        DrawCmdHeader,       // [Internal] template of active commands. Fields should match those of CmdBuffer.back().
 	_Splitter:         DrawListSplitter,    // [Internal] for channels api (note: prefer using your own persistent instance of ImDrawListSplitter!)
 	_ClipRectStack:    Vector_Vec4,         // [Internal]
-	_TextureIdStack:   Vector_TextureID,    // [Internal]
+	_TextureStack:     Vector_TextureRef,   // [Internal]
 	_CallbacksDataBuf: Vector_U8,           // [Internal]
 	_FringeScale:      f32,                 // [Internal] anti-alias fringe is scaled by this value, this helps to keep things sharp while zooming at vertex buffer content
 	_OwnerName:        cstring,             // Pointer to owner window's name for debugging
@@ -1768,58 +1876,106 @@ DrawList :: struct {
 // (NB: the style and the naming convention here is a little inconsistent, we currently preserve them for backward compatibility purpose,
 // as this is one of the oldest structure exposed by the library! Basically, ImDrawList == CmdList)
 DrawData :: struct {
-	Valid:            bool,               // Only valid after Render() is called and before the next NewFrame() is called.
-	CmdListsCount:    c.int,              // Number of ImDrawList* to render
-	TotalIdxCount:    c.int,              // For convenience, sum of all ImDrawList's IdxBuffer.Size
-	TotalVtxCount:    c.int,              // For convenience, sum of all ImDrawList's VtxBuffer.Size
-	CmdLists:         Vector_DrawListPtr, // Array of ImDrawList* to render. The ImDrawLists are owned by ImGuiContext and only pointed to from here.
-	DisplayPos:       Vec2,               // Top-left position of the viewport to render (== top-left of the orthogonal projection matrix to use) (== GetMainViewport()->Pos for the main viewport, == (0.0) in most single-viewport applications)
-	DisplaySize:      Vec2,               // Size of the viewport to render (== GetMainViewport()->Size for the main viewport, == io.DisplaySize in most single-viewport applications)
-	FramebufferScale: Vec2,               // Amount of pixels for each unit of DisplaySize. Based on io.DisplayFramebufferScale. Generally (1,1) on normal display, (2,2) on OSX with Retina display.
-	OwnerViewport:    ^Viewport,          // Viewport carrying the ImDrawData instance, might be of use to the renderer (generally not).
+	Valid:            bool,                   // Only valid after Render() is called and before the next NewFrame() is called.
+	CmdListsCount:    c.int,                  // == CmdLists.Size. (OBSOLETE: exists for legacy reasons). Number of ImDrawList* to render.
+	TotalIdxCount:    c.int,                  // For convenience, sum of all ImDrawList's IdxBuffer.Size
+	TotalVtxCount:    c.int,                  // For convenience, sum of all ImDrawList's VtxBuffer.Size
+	CmdLists:         Vector_DrawListPtr,     // Array of ImDrawList* to render. The ImDrawLists are owned by ImGuiContext and only pointed to from here.
+	DisplayPos:       Vec2,                   // Top-left position of the viewport to render (== top-left of the orthogonal projection matrix to use) (== GetMainViewport()->Pos for the main viewport, == (0.0) in most single-viewport applications)
+	DisplaySize:      Vec2,                   // Size of the viewport to render (== GetMainViewport()->Size for the main viewport, == io.DisplaySize in most single-viewport applications)
+	FramebufferScale: Vec2,                   // Amount of pixels for each unit of DisplaySize. Copied from viewport->FramebufferScale (== io.DisplayFramebufferScale for main viewport). Generally (1,1) on normal display, (2,2) on OSX with Retina display.
+	OwnerViewport:    ^Viewport,              // Viewport carrying the ImDrawData instance, might be of use to the renderer (generally not).
+	Textures:         ^Vector_TextureDataPtr, // List of textures to update. Most of the times the list is shared by all ImDrawData, has only 1 texture and it doesn't need any update. This almost always points to ImGui::GetPlatformIO().Textures[]. May be overriden or set to NULL if you want to manually update textures.
+}
+
+// Coordinates of a rectangle within a texture.
+// When a texture is in ImTextureStatus_WantUpdates state, we provide a list of individual rectangles to copy to the graphics system.
+// You may use ImTextureData::Updates[] for the list, or ImTextureData::UpdateBox for a single bounding box.
+TextureRect :: struct {
+	x: c.ushort, // Upper-left coordinates of rectangle to update
+	y: c.ushort, // Upper-left coordinates of rectangle to update
+	w: c.ushort, // Size of rectangle to update (in pixels)
+	h: c.ushort, // Size of rectangle to update (in pixels)
+}
+
+// Specs and pixel storage for a texture used by Dear ImGui.
+// This is only useful for (1) core library and (2) backends. End-user/applications do not need to care about this.
+// Renderer Backends will create a GPU-side version of this.
+// Why does we store two identifiers: TexID and BackendUserData?
+// - ImTextureID    TexID           = lower-level identifier stored in ImDrawCmd. ImDrawCmd can refer to textures not created by the backend, and for which there's no ImTextureData.
+// - void*          BackendUserData = higher-level opaque storage for backend own book-keeping. Some backends may have enough with TexID and not need both.
+// In columns below: who reads/writes each fields? 'r'=read, 'w'=write, 'core'=main library, 'backend'=renderer backend
+TextureData :: struct {
+	//------------------------------------------ core / backend ---------------------------------------
+	UniqueID:             c.int,              // w    -   // [DEBUG] Sequential index to facilitate identifying a texture when debugging/printing. Unique per atlas.
+	Status:               TextureStatus,      // rw   rw  // ImTextureStatus_OK/_WantCreate/_WantUpdates/_WantDestroy. Always use SetStatus() to modify!
+	BackendUserData:      rawptr,             // -    rw  // Convenience storage for backend. Some backends may have enough with TexID.
+	TexID:                TextureID,          // r    w   // Backend-specific texture identifier. Always use SetTexID() to modify! The identifier will stored in ImDrawCmd::GetTexID() and passed to backend's RenderDrawData function.
+	Format:               TextureFormat,      // w    r   // ImTextureFormat_RGBA32 (default) or ImTextureFormat_Alpha8
+	Width:                c.int,              // w    r   // Texture width
+	Height:               c.int,              // w    r   // Texture height
+	BytesPerPixel:        c.int,              // w    r   // 4 or 1
+	Pixels:               ^c.uchar,           // w    r   // Pointer to buffer holding 'Width*Height' pixels and 'Width*Height*BytesPerPixels' bytes.
+	UsedRect:             TextureRect,        // w    r   // Bounding box encompassing all past and queued Updates[].
+	UpdateRect:           TextureRect,        // w    r   // Bounding box encompassing all queued Updates[].
+	Updates:              Vector_TextureRect, // w    r   // Array of individual updates.
+	UnusedFrames:         c.int,              // w    r   // In order to facilitate handling Status==WantDestroy in some backend: this is a count successive frames where the texture was not used. Always >0 when Status==WantDestroy.
+	RefCount:             c.ushort,           // w    r   // Number of contexts using this texture. Used during backend shutdown.
+	UseColors:            bool,               // w    r   // Tell whether our texture data is known to use colors (rather than just white + alpha).
+	WantDestroyNextFrame: bool,               // rw   -   // [Internal] Queued to set ImTextureStatus_WantDestroy next frame. May still be used in the current frame.
 }
 
 // A font input/source (we may rename this to ImFontSource in the future)
 FontConfig :: struct {
-	FontData:             rawptr, //          // TTF/OTF data
-	FontDataSize:         c.int,  //          // TTF/OTF data size
-	FontDataOwnedByAtlas: bool,   // true     // TTF/OTF data ownership taken by the container ImFontAtlas (will delete memory itself).
-	MergeMode:            bool,   // false    // Merge into previous ImFont, so you can combine multiple inputs font into one ImFont (e.g. ASCII font + icons + Japanese glyphs). You may want to use GlyphOffset.y when merge font of different heights.
-	PixelSnapH:           bool,   // false    // Align every glyph AdvanceX to pixel boundaries. Useful e.g. if you are merging a non-pixel aligned font with the default font. If enabled, you can set OversampleH/V to 1.
-	FontNo:               c.int,  // 0        // Index of font within TTF/OTF file
-	OversampleH:          c.int,  // 0 (2)    // Rasterize at higher quality for sub-pixel positioning. 0 == auto == 1 or 2 depending on size. Note the difference between 2 and 3 is minimal. You can reduce this to 1 for large glyphs save memory. Read https://github.com/nothings/stb/blob/master/tests/oversample/README.md for details.
-	OversampleV:          c.int,  // 0 (1)    // Rasterize at higher quality for sub-pixel positioning. 0 == auto == 1. This is not really useful as we don't use sub-pixel positions on the Y axis.
-	SizePixels:           f32,    //          // Size in pixels for rasterizer (more or less maps to the resulting font height).
-	//ImVec2        GlyphExtraSpacing;      // 0, 0     // (REMOVED IN 1.91.9: use GlyphExtraAdvanceX)
-	GlyphOffset:        Vec2,   // 0, 0     // Offset all glyphs from this font input.
-	GlyphRanges:        ^Wchar, // NULL     // THE ARRAY DATA NEEDS TO PERSIST AS LONG AS THE FONT IS ALIVE. Pointer to a user-provided list of Unicode range (2 value per range, values are inclusive, zero-terminated list).
-	GlyphMinAdvanceX:   f32,    // 0        // Minimum AdvanceX for glyphs, set Min to align font icons, set both Min/Max to enforce mono-space font
-	GlyphMaxAdvanceX:   f32,    // FLT_MAX  // Maximum AdvanceX for glyphs
-	GlyphExtraAdvanceX: f32,    // 0        // Extra spacing (in pixels) between glyphs. Please contact us if you are using this.
-	FontBuilderFlags:   c.uint, // 0        // Settings for custom font builder. THIS IS BUILDER IMPLEMENTATION DEPENDENT. Leave as zero if unsure.
-	RasterizerMultiply: f32,    // 1.0f     // Linearly brighten (>1.0f) or darken (<1.0f) font output. Brightening small fonts may be a good workaround to make them more readable. This is a silly thing we may remove in the future.
-	RasterizerDensity:  f32,    // 1.0f     // DPI scale for rasterization, not altering other font metrics: make it easy to swap between e.g. a 100% and a 400% fonts for a zooming display. IMPORTANT: If you increase this it is expected that you increase font scale accordingly, otherwise quality may look lowered.
+	// Data Source
+	Name:                 [40]c.char, // <auto>   // Name (strictly to ease debugging, hence limited size buffer)
+	FontData:             rawptr,     //          // TTF/OTF data
+	FontDataSize:         c.int,      //          // TTF/OTF data size
+	FontDataOwnedByAtlas: bool,       // true     // TTF/OTF data ownership taken by the container ImFontAtlas (will delete memory itself).
+	// Options
+	MergeMode:          bool,   // false    // Merge into previous ImFont, so you can combine multiple inputs font into one ImFont (e.g. ASCII font + icons + Japanese glyphs). You may want to use GlyphOffset.y when merge font of different heights.
+	PixelSnapH:         bool,   // false    // Align every glyph AdvanceX to pixel boundaries. Useful e.g. if you are merging a non-pixel aligned font with the default font. If enabled, you can set OversampleH/V to 1.
+	PixelSnapV:         bool,   // true     // Align Scaled GlyphOffset.y to pixel boundaries.
+	OversampleH:        i8,     // 0 (2)    // Rasterize at higher quality for sub-pixel positioning. 0 == auto == 1 or 2 depending on size. Note the difference between 2 and 3 is minimal. You can reduce this to 1 for large glyphs save memory. Read https://github.com/nothings/stb/blob/master/tests/oversample/README.md for details.
+	OversampleV:        i8,     // 0 (1)    // Rasterize at higher quality for sub-pixel positioning. 0 == auto == 1. This is not really useful as we don't use sub-pixel positions on the Y axis.
 	EllipsisChar:       Wchar,  // 0        // Explicitly specify Unicode codepoint of ellipsis character. When fonts are being merged first specified ellipsis will be used.
+	SizePixels:         f32,    //          // Size in pixels for rasterizer (more or less maps to the resulting font height).
+	GlyphRanges:        ^Wchar, // NULL     // *LEGACY* THE ARRAY DATA NEEDS TO PERSIST AS LONG AS THE FONT IS ALIVE. Pointer to a user-provided list of Unicode range (2 value per range, values are inclusive, zero-terminated list).
+	GlyphExcludeRanges: ^Wchar, // NULL     // Pointer to a small user-provided list of Unicode ranges (2 value per range, values are inclusive, zero-terminated list). This is very close to GlyphRanges[] but designed to exclude ranges from a font source, when merging fonts with overlapping glyphs. Use "Input Glyphs Overlap Detection Tool" to find about your overlapping ranges.
+	//ImVec2        GlyphExtraSpacing;      // 0, 0     // (REMOVED AT IT SEEMS LARGELY OBSOLETE. PLEASE REPORT IF YOU WERE USING THIS). Extra spacing (in pixels) between glyphs when rendered: essentially add to glyph->AdvanceX. Only X axis is supported for now.
+	GlyphOffset:        Vec2,   // 0, 0     // Offset (in pixels) all glyphs from this font input. Absolute value for default size, other sizes will scale this value.
+	GlyphMinAdvanceX:   f32,    // 0        // Minimum AdvanceX for glyphs, set Min to align font icons, set both Min/Max to enforce mono-space font. Absolute value for default size, other sizes will scale this value.
+	GlyphMaxAdvanceX:   f32,    // FLT_MAX  // Maximum AdvanceX for glyphs
+	GlyphExtraAdvanceX: f32,    // 0        // Extra spacing (in pixels) between glyphs. Please contact us if you are using this. // FIXME-NEWATLAS: Intentionally unscaled
+	FontNo:             u32,    // 0        // Index of font within TTF/OTF file
+	FontLoaderFlags:    c.uint, // 0        // Settings for custom font builder. THIS IS BUILDER IMPLEMENTATION DEPENDENT. Leave as zero if unsure.
+	//unsigned int  FontBuilderFlags;       // --       // [Renamed in 1.92] Ue FontLoaderFlags.
+	RasterizerMultiply: f32, // 1.0f     // Linearly brighten (>1.0f) or darken (<1.0f) font output. Brightening small fonts may be a good workaround to make them more readable. This is a silly thing we may remove in the future.
+	RasterizerDensity:  f32, // 1.0f     // [LEGACY: this only makes sense when ImGuiBackendFlags_RendererHasTextures is not supported] DPI scale multiplier for rasterization. Not altering other font metrics: makes it easy to swap between e.g. a 100% and a 400% fonts for a zooming display, or handle Retina screen. IMPORTANT: If you change this it is expected that you increase/decrease font scale roughly to the inverse of this, otherwise quality may look lowered.
 	// [Internal]
-	Name:    [40]c.char, // Name (strictly to ease debugging)
-	DstFont: ^Font,
+	Flags:          FontFlags,   // Font flags (don't use just yet, will be exposed in upcoming 1.92.X updates)
+	DstFont:        ^Font,       // Target font (as we merging fonts, multiple ImFontConfig may target the same font)
+	FontLoader:     ^FontLoader, // Custom font backend for this source (default source is the one stored in ImFontAtlas)
+	FontLoaderData: rawptr,      // Font loader opaque storage (per font config)
 }
 
 // Hold rendering data for one glyph.
-// (Note: some language parsers may fail to convert the 31+1 bitfield members, in this case maybe drop store a single u32 or we can rework this)
+// (Note: some language parsers may fail to convert the bitfield members, in this case maybe drop store a single u32 or we can rework this)
 FontGlyph :: struct {
 	Colored:   c.uint, // Flag to indicate glyph is colored and should generally ignore tinting (make it usable with no shift on little-endian as this is used in loops)
 	Visible:   c.uint, // Flag to indicate glyph has no visible pixels (e.g. space). Allow early out when rendering.
+	SourceIdx: c.uint, // Index of source in parent font
 	Codepoint: c.uint, // 0x0000..0x10FFFF
-	AdvanceX:  f32,    // Horizontal distance to advance layout with
-	X0:        f32,    // Glyph corners
-	Y0:        f32,    // Glyph corners
-	X1:        f32,    // Glyph corners
-	Y1:        f32,    // Glyph corners
-	U0:        f32,    // Texture coordinates
-	V0:        f32,    // Texture coordinates
-	U1:        f32,    // Texture coordinates
-	V1:        f32,    // Texture coordinates
+	AdvanceX:  f32,    // Horizontal distance to advance cursor/layout position.
+	X0:        f32,    // Glyph corners. Offsets from current cursor/layout position.
+	Y0:        f32,    // Glyph corners. Offsets from current cursor/layout position.
+	X1:        f32,    // Glyph corners. Offsets from current cursor/layout position.
+	Y1:        f32,    // Glyph corners. Offsets from current cursor/layout position.
+	U0:        f32,    // Texture coordinates for the current value of ImFontAtlas->TexRef. Cached equivalent of calling GetCustomRect() with PackId.
+	V0:        f32,    // Texture coordinates for the current value of ImFontAtlas->TexRef. Cached equivalent of calling GetCustomRect() with PackId.
+	U1:        f32,    // Texture coordinates for the current value of ImFontAtlas->TexRef. Cached equivalent of calling GetCustomRect() with PackId.
+	V1:        f32,    // Texture coordinates for the current value of ImFontAtlas->TexRef. Cached equivalent of calling GetCustomRect() with PackId.
+	PackId:    c.int,  // [Internal] ImFontAtlasRectId value (FIXME: Cold data, could be moved elsewhere?)
 }
 
 // Helper to build glyph ranges from text/string data. Feed your application strings/characters to it then call BuildRanges().
@@ -1828,31 +1984,30 @@ FontGlyphRangesBuilder :: struct {
 	UsedChars: Vector_U32, // Store 1-bit per Unicode code point (0=unused, 1=used)
 }
 
-// See ImFontAtlas::AddCustomRectXXX functions.
-FontAtlasCustomRect :: struct {
-	X: c.ushort, // Output   // Packed position in Atlas
-	Y: c.ushort, // Output   // Packed position in Atlas
-	// [Internal]
-	Width: c.ushort, // Input    // Desired rectangle dimension
-	// [Internal]
-	Height:        c.ushort, // Input    // Desired rectangle dimension
-	GlyphID:       c.uint,   // Input    // For custom font glyphs only (ID < 0x110000)
-	GlyphColored:  c.uint,   // Input  // For custom font glyphs only: glyph is colored, removed tinting.
-	GlyphAdvanceX: f32,      // Input    // For custom font glyphs only: glyph xadvance
-	GlyphOffset:   Vec2,     // Input    // For custom font glyphs only: glyph display offset
-	Font_:         ^Font,    // Input    // For custom font glyphs only: target font
+// Output of ImFontAtlas::GetCustomRect() when using custom rectangles.
+// Those values may not be cached/stored as they are only valid for the current value of atlas->TexRef
+// (this is in theory derived from ImTextureRect but we use separate structures for reasons)
+FontAtlasRect :: struct {
+	x:   c.ushort, // Position (in current texture)
+	y:   c.ushort, // Position (in current texture)
+	w:   c.ushort, // Size
+	h:   c.ushort, // Size
+	uv0: Vec2,     // UV coordinates (in current texture)
+	uv1: Vec2,     // UV coordinates (in current texture)
 }
 
 // Load and rasterize multiple TTF/OTF fonts into a same texture. The font atlas will build a single texture holding:
 //  - One or more fonts.
 //  - Custom graphics data needed to render the shapes needed by Dear ImGui.
 //  - Mouse cursor shapes for software cursor rendering (unless setting 'Flags |= ImFontAtlasFlags_NoMouseCursors' in the font atlas).
-// It is the user-code responsibility to setup/build the atlas, then upload the pixel data into a texture accessible by your graphics api.
-//  - Optionally, call any of the AddFont*** functions. If you don't call any, the default font embedded in the code will be loaded for you.
-//  - Call GetTexDataAsAlpha8() or GetTexDataAsRGBA32() to build and retrieve pixels data.
-//  - Upload the pixels data into a texture within your graphics system (see imgui_impl_xxxx.cpp examples)
+//  - If you don't call any AddFont*** functions, the default font embedded in the code will be loaded for you.
+// It is the rendering backend responsibility to upload texture into your graphics API:
+//  - ImGui_ImplXXXX_RenderDrawData() functions generally iterate platform_io->Textures[] to create/update/destroy each ImTextureData instance.
+//  - Backend then set ImTextureData's TexID and BackendUserData.
+//  - Texture id are passed back to you during rendering to identify the texture. Read FAQ entry about ImTextureID/ImTextureRef for more details.
+// Legacy path:
+//  - Call Build() + GetTexDataAsAlpha8() or GetTexDataAsRGBA32() to build and retrieve pixels data.
 //  - Call SetTexID(my_tex_id); and pass the pointer/identifier to your texture in a format natural to your graphics API.
-//    This value will be passed back to you during rendering to identify the texture. Read FAQ entry about ImTextureID for more details.
 // Common pitfalls:
 // - If you pass a 'glyph_ranges' array to AddFont*** functions, you need to make sure that your array persist up until the
 //   atlas is build (when calling GetTexData*** or Build()). We only copy the pointer, not the data.
@@ -1862,61 +2017,94 @@ FontAtlasCustomRect :: struct {
 // - This is an old API and it is currently awkward for those and various other reasons! We will address them in the future!
 FontAtlas :: struct {
 	// Input
-	Flags:           FontAtlasFlags, // Build flags (see ImFontAtlasFlags_)
-	TexID:           TextureID,      // User data to refer to the texture once it has been uploaded to user's graphic systems. It is passed back to you during rendering via the ImDrawCmd structure.
-	TexDesiredWidth: c.int,          // Texture width desired by user before Build(). Must be a power-of-two. If have many glyphs your graphics API have texture size restrictions you may want to increase texture width to decrease height.
-	TexGlyphPadding: c.int,          // FIXME: Should be called "TexPackPadding". Padding between glyphs within texture in pixels. Defaults to 1. If your rendering method doesn't rely on bilinear filtering you may set this to 0 (will also need to set AntiAliasedLinesUseTex = false).
-	UserData:        rawptr,         // Store your own atlas related user-data (if e.g. you have multiple font atlas).
+	Flags:             FontAtlasFlags,    // Build flags (see ImFontAtlasFlags_)
+	TexDesiredFormat:  TextureFormat,     // Desired texture format (default to ImTextureFormat_RGBA32 but may be changed to ImTextureFormat_Alpha8).
+	TexGlyphPadding:   c.int,             // FIXME: Should be called "TexPackPadding". Padding between glyphs within texture in pixels. Defaults to 1. If your rendering method doesn't rely on bilinear filtering you may set this to 0 (will also need to set AntiAliasedLinesUseTex = false).
+	TexMinWidth:       c.int,             // Minimum desired texture width. Must be a power of two. Default to 512.
+	TexMinHeight:      c.int,             // Minimum desired texture height. Must be a power of two. Default to 128.
+	TexMaxWidth:       c.int,             // Maximum desired texture width. Must be a power of two. Default to 8192.
+	TexMaxHeight:      c.int,             // Maximum desired texture height. Must be a power of two. Default to 8192.
+	UserData:          rawptr,            // Store your own atlas related user-data (if e.g. you have multiple font atlas).
+	__anonymous_type1: __anonymous_type1, // Latest texture identifier == TexData->GetTexRef(). // RENAMED TexID to TexRef in 1.92.x
+	TexData:           ^TextureData,      // Latest texture.
 	// [Internal]
-	// NB: Access texture data via GetTexData*() calls! Which will setup a default font for you.
-	Locked:             bool,                       // Marked as Locked by ImGui::NewFrame() so attempt to modify the atlas will assert.
-	TexReady:           bool,                       // Set when texture was built matching current font input
-	TexPixelsUseColors: bool,                       // Tell whether our texture data is known to use colors (rather than just alpha channel), in order to help backend select a format.
-	TexPixelsAlpha8:    ^c.uchar,                   // 1 component per pixel, each component is unsigned 8-bit. Total size = TexWidth * TexHeight
-	TexPixelsRGBA32:    ^c.uint,                    // 4 component per pixel, each component is unsigned 8-bit. Total size = TexWidth * TexHeight * 4
-	TexWidth:           c.int,                      // Texture width calculated during Build().
-	TexHeight:          c.int,                      // Texture height calculated during Build().
-	TexUvScale:         Vec2,                       // = (1.0f/TexWidth, 1.0f/TexHeight)
-	TexUvWhitePixel:    Vec2,                       // Texture coordinates to a white pixel
-	Fonts:              Vector_FontPtr,             // Hold all the fonts returned by AddFont*. Fonts[0] is the default font upon calling ImGui::NewFrame(), use ImGui::PushFont()/PopFont() to change the current font.
-	CustomRects:        Vector_FontAtlasCustomRect, // Rectangles for packing custom texture data into the atlas.
-	Sources:            Vector_FontConfig,          // Source/configuration data
-	TexUvLines:         [64]Vec4,                   // UVs for baked anti-aliased lines
-	// [Internal] Font builder
-	FontBuilderIO:    ^FontBuilderIO, // Opaque interface to a font builder (default to stb_truetype, can be changed to use FreeType by defining IMGUI_ENABLE_FREETYPE).
-	FontBuilderFlags: c.uint,         // Shared flags (for all fonts) for custom font builder. THIS IS BUILD IMPLEMENTATION DEPENDENT. Per-font override is also available in ImFontConfig.
-	// [Internal] Packing data
-	PackIdMouseCursors: c.int, // Custom texture rectangle ID for white pixel and mouse cursors
-	PackIdLines:        c.int, // Custom texture rectangle ID for baked anti-aliased lines
+	TexList:             Vector_TextureDataPtr,        // Texture list (most often TexList.Size == 1). TexData is always == TexList.back(). DO NOT USE DIRECTLY, USE GetDrawData().Textures[]/GetPlatformIO().Textures[] instead!
+	Locked:              bool,                         // Marked as locked during ImGui::NewFrame()..EndFrame() scope if TexUpdates are not supported. Any attempt to modify the atlas will assert.
+	RendererHasTextures: bool,                         // Copy of (BackendFlags & ImGuiBackendFlags_RendererHasTextures) from supporting context.
+	TexIsBuilt:          bool,                         // Set when texture was built matching current font input. Mostly useful for legacy IsBuilt() call.
+	TexPixelsUseColors:  bool,                         // Tell whether our texture data is known to use colors (rather than just alpha channel), in order to help backend select a format or conversion process.
+	TexUvScale:          Vec2,                         // = (1.0f/TexData->TexWidth, 1.0f/TexData->TexHeight). May change as new texture gets created.
+	TexUvWhitePixel:     Vec2,                         // Texture coordinates to a white pixel. May change as new texture gets created.
+	Fonts:               Vector_FontPtr,               // Hold all the fonts returned by AddFont*. Fonts[0] is the default font upon calling ImGui::NewFrame(), use ImGui::PushFont()/PopFont() to change the current font.
+	Sources:             Vector_FontConfig,            // Source/configuration data
+	TexUvLines:          [64]Vec4,                     // UVs for baked anti-aliased lines
+	TexNextUniqueID:     c.int,                        // Next value to be stored in TexData->UniqueID
+	FontNextUniqueID:    c.int,                        // Next value to be stored in ImFont->FontID
+	DrawListSharedDatas: Vector_DrawListSharedDataPtr, // List of users for this atlas. Typically one per Dear ImGui context.
+	Builder:             ^FontAtlasBuilder,            // Opaque interface to our data that doesn't need to be public and may be discarded when rebuilding.
+	FontLoader:          ^FontLoader,                  // Font loader opaque interface (default to use FreeType when IMGUI_ENABLE_FREETYPE is defined, otherwise default to use stb_truetype). Use SetFontLoader() to change this at runtime.
+	FontLoaderName:      cstring,                      // Font loader name (for display e.g. in About box) == FontLoader->Name
+	FontLoaderData:      rawptr,                       // Font backend opaque storage
+	FontLoaderFlags:     c.uint,                       // Shared flags (for all fonts) for font loader. THIS IS BUILD IMPLEMENTATION DEPENDENT (e.g. Per-font override is also available in ImFontConfig).
+	RefCount:            c.int,                        // Number of contexts using this atlas
+	OwnerContext:        ^Context,                     // Context which own the atlas will be in charge of updating and destroying it.
+	// Legacy: You can request your rectangles to be mapped as font glyph (given a font + Unicode point), so you can render e.g. custom colorful icons and use them as regular glyphs. --> Prefer using a custom ImFontLoader.
+	TempRect: FontAtlasRect, // For old GetCustomRectByIndex() API
+}
+
+__anonymous_type1 :: struct { // Latest texture identifier == TexData->GetTexRef(). // RENAMED TexID to TexRef in 1.92.x
+	TexRef: TextureRef,
+	TexID:  TextureRef,
+}
+
+// Font runtime data for a given size
+// Important: pointers to ImFontBaked are only valid for the current frame.
+FontBaked :: struct {
+	// [Internal] Members: Hot ~20/24 bytes (for CalcTextSize)
+	IndexAdvanceX:     Vector_float, // 12-16 // out // Sparse. Glyphs->AdvanceX in a directly indexable way (cache-friendly for CalcTextSize functions which only this info, and are often bottleneck in large UI).
+	FallbackAdvanceX:  f32,          // 4     // out // FindGlyph(FallbackChar)->AdvanceX
+	Size:              f32,          // 4     // in  // Height of characters/line, set during loading (doesn't change after loading)
+	RasterizerDensity: f32,          // 4     // in  // Density this is baked at
+	// [Internal] Members: Hot ~28/36 bytes (for RenderText loop)
+	IndexLookup:        Vector_U16,       // 12-16 // out // Sparse. Index glyphs by Unicode code-point.
+	Glyphs:             Vector_FontGlyph, // 12-16 // out // All glyphs.
+	FallbackGlyphIndex: c.int,            // 4     // out // Index of FontFallbackChar
+	// [Internal] Members: Cold
+	Ascent: f32, // 4+4   // out // Ascent: distance from top to bottom of e.g. 'A' [0..FontSize] (unscaled)
+	// [Internal] Members: Cold
+	Descent:              f32,    // 4+4   // out // Ascent: distance from top to bottom of e.g. 'A' [0..FontSize] (unscaled)
+	MetricsTotalSurface:  c.uint, // 3  // out // Total surface in pixels to get an idea of the font rasterization/texture cost (not exact, we approximate the cost of padding between glyphs)
+	WantDestroy:          c.uint, // 0  //     // Queued for destroy
+	LoadNoFallback:       c.uint, // 0  //     // Disable loading fallback in lower-level calls.
+	LoadNoRenderOnLayout: c.uint, // 0  //     // Enable a two-steps mode where CalcTextSize() calls will load AdvanceX *without* rendering/packing glyphs. Only advantagous if you know that the glyph is unlikely to actually be rendered, otherwise it is slower because we'd do one query on the first CalcTextSize and one query on the first Draw.
+	LastUsedFrame:        c.int,  // 4  //     // Record of that time this was bounds
+	BakedId:              ID,     // 4     //     // Unique ID for this baked storage
+	ContainerFont:        ^Font,  // 4-8   // in  // Parent font
+	FontLoaderDatas:      rawptr, // 4-8   //     // Font loader opaque storage (per baked font * sources): single contiguous buffer allocated by imgui, passed to loader.
 }
 
 // Font runtime data and rendering
-// ImFontAtlas automatically loads a default embedded font for you when you call GetTexDataAsAlpha8() or GetTexDataAsRGBA32().
+// - ImFontAtlas automatically loads a default embedded font for you if you didn't load one manually.
+// - Since 1.92.X a font may be rendered as any size! Therefore a font doesn't have one specific size.
+// - Use 'font->GetFontBaked(size)' to retrieve the ImFontBaked* corresponding to a given size.
+// - If you used g.Font + g.FontSize (which is frequent from the ImGui layer), you can use g.FontBaked as a shortcut, as g.FontBaked == g.Font->GetFontBaked(g.FontSize).
 Font :: struct {
-	// [Internal] Members: Hot ~20/24 bytes (for CalcTextSize)
-	IndexAdvanceX:    Vector_float, // 12-16 // out // Sparse. Glyphs->AdvanceX in a directly indexable way (cache-friendly for CalcTextSize functions which only this info, and are often bottleneck in large UI).
-	FallbackAdvanceX: f32,          // 4     // out // = FallbackGlyph->AdvanceX
-	FontSize:         f32,          // 4     // in  // Height of characters/line, set during loading (don't change after loading)
-	// [Internal] Members: Hot ~28/40 bytes (for RenderText loop)
-	IndexLookup:   Vector_U16,       // 12-16 // out // Sparse. Index glyphs by Unicode code-point.
-	Glyphs:        Vector_FontGlyph, // 12-16 // out // All glyphs.
-	FallbackGlyph: ^FontGlyph,       // 4-8   // out // = FindGlyph(FontFallbackChar)
-	// [Internal] Members: Cold ~32/40 bytes
+	// [Internal] Members: Hot ~12-20 bytes
+	LastBaked:                ^FontBaked, // 4-8   // Cache last bound baked. NEVER USE DIRECTLY. Use GetFontBaked().
+	ContainerAtlas:           ^FontAtlas, // 4-8   // What we have been loaded into.
+	Flags:                    FontFlags,  // 4     // Font flags.
+	CurrentRasterizerDensity: f32,        // Current rasterizer density. This is a varying state of the font.
+	// [Internal] Members: Cold ~24-52 bytes
 	// Conceptually Sources[] is the list of font sources merged to create this font.
-	ContainerAtlas:      ^FontAtlas,  // 4-8   // out // What we has been loaded into
-	Sources:             ^FontConfig, // 4-8   // in  // Pointer within ContainerAtlas->Sources[], to SourcesCount instances
-	SourcesCount:        c.short,     // 2     // in  // Number of ImFontConfig involved in creating this font. Usually 1, or >1 when merging multiple font sources into one ImFont.
-	EllipsisCharCount:   c.short,     // 1     // out // 1 or 3
-	EllipsisChar:        Wchar,       // 2-4   // out // Character used for ellipsis rendering ('...').
-	FallbackChar:        Wchar,       // 2-4   // out // Character used if a glyph isn't found (U+FFFD, '?')
-	EllipsisWidth:       f32,         // 4     // out // Total ellipsis Width
-	EllipsisCharStep:    f32,         // 4     // out // Step between characters when EllipsisCount > 0
-	Scale:               f32,         // 4     // in  // Base font scale (1.0f), multiplied by the per-window font scale which you can adjust with SetWindowFontScale()
-	Ascent:              f32,         // 4+4   // out // Ascent: distance from top to bottom of e.g. 'A' [0..FontSize] (unscaled)
-	Descent:             f32,         // 4+4   // out // Ascent: distance from top to bottom of e.g. 'A' [0..FontSize] (unscaled)
-	MetricsTotalSurface: c.int,       // 4     // out // Total surface in pixels to get an idea of the font rasterization/texture cost (not exact, we approximate the cost of padding between glyphs)
-	DirtyLookupTables:   bool,        // 1     // out //
-	Used8kPagesMap:      [1]u8,       // 1 bytes if ImWchar=ImWchar16, 16 bytes if ImWchar==ImWchar32. Store 1-bit for each block of 4K codepoints that has one active glyph. This is mainly used to facilitate iterations across all used codepoints.
+	FontId:           ID,                   // Unique identifier for the font
+	LegacySize:       f32,                  // 4     // in  // Font size passed to AddFont(). Use for old code calling PushFont() expecting to use that size. (use ImGui::GetFontBaked() to get font baked at current bound size).
+	Sources:          Vector_FontConfigPtr, // 16    // in  // List of sources. Pointers within ContainerAtlas->Sources[]
+	EllipsisChar:     Wchar,                // 2-4   // out // Character used for ellipsis rendering ('...').
+	FallbackChar:     Wchar,                // 2-4   // out // Character used if a glyph isn't found (U+FFFD, '?')
+	Used8kPagesMap:   [1]u8,                // 1 bytes if ImWchar=ImWchar16, 16 bytes if ImWchar==ImWchar32. Store 1-bit for each block of 4K codepoints that has one active glyph. This is mainly used to facilitate iterations across all used codepoints.
+	EllipsisAutoBake: bool,                 // 1     //     // Mark when the "..." glyph needs to be generated.
+	RemapPairs:       Storage,              // 16    //     // Remapping pairs when using AddRemapChar(), otherwise empty.
+	Scale:            f32,                  // 4     // in  // Legacy base font scale (~1.0f), multiplied by the per-window font scale which you can adjust with SetWindowFontScale()
 }
 
 // - Currently represents the Platform Window created by the application which is hosting our Dear ImGui windows.
@@ -1931,10 +2119,12 @@ Viewport :: struct {
 	Flags:            ViewportFlags, // See ImGuiViewportFlags_
 	Pos:              Vec2,          // Main Area: Position of the viewport (Dear ImGui coordinates are the same as OS desktop/native coordinates)
 	Size:             Vec2,          // Main Area: Size of the viewport.
+	FramebufferScale: Vec2,          // Density of the viewport for Retina display (always 1,1 on Windows, may be 2,2 etc on macOS/iOS). This will affect font rasterizer density.
 	WorkPos:          Vec2,          // Work Area: Position of the viewport minus task bars, menus bars, status bars (>= Pos)
 	WorkSize:         Vec2,          // Work Area: Size of the viewport minus task bars, menu bars, status bars (<= Size)
 	DpiScale:         f32,           // 1.0f = 96 DPI = No extra scale.
 	ParentViewportId: ID,            // (Advanced) 0: no parent. Instruct the platform backend to setup a parent/child relationship between platform windows.
+	ParentViewport:   ^Viewport,     // (Advanced) Direct shortcut to ImGui::FindViewportByID(ParentViewportId). NULL: no parent.
 	DrawData_:        ^DrawData,     // The ImDrawData corresponding to this viewport. Valid after Render() and until the next call to NewFrame().
 	// Platform/Backend Dependent Data
 	// Our design separate the Renderer and Platform backends to facilitate combining default backends with each others.
@@ -1969,28 +2159,32 @@ PlatformIO :: struct {
 	// Optional: Platform locale
 	// [Experimental] Configure decimal point e.g. '.' or ',' useful for some languages (e.g. German), generally pulled from *localeconv()->decimal_point
 	Platform_LocaleDecimalPoint: Wchar, // '.'
+	// Optional: Maximum texture size supported by renderer (used to adjust how we size textures). 0 if not known.
+	Renderer_TextureMaxWidth:  c.int,
+	Renderer_TextureMaxHeight: c.int,
 	// Written by some backends during ImGui_ImplXXXX_RenderDrawData() call to point backend_specific ImGui_ImplXXXX_RenderState* structure.
 	Renderer_RenderState: rawptr,
 	// Platform Backend functions (e.g. Win32, GLFW, SDL) ------------------- Called by -----
-	Platform_CreateWindow:            proc "c" (vp: ^Viewport),                                                                     // . . U . .  // Create a new platform window for the given viewport
-	Platform_DestroyWindow:           proc "c" (vp: ^Viewport),                                                                     // N . U . D  //
-	Platform_ShowWindow:              proc "c" (vp: ^Viewport),                                                                     // . . U . .  // Newly created windows are initially hidden so SetWindowPos/Size/Title can be called on them before showing the window
-	Platform_SetWindowPos:            proc "c" (vp: ^Viewport, pos: Vec2),                                                          // . . U . .  // Set platform window position (given the upper-left corner of client area)
-	Platform_GetWindowPos:            proc "c" (vp: ^Viewport) -> Vec2,                                                             // N . . . .  //
-	Platform_SetWindowSize:           proc "c" (vp: ^Viewport, size: Vec2),                                                         // . . U . .  // Set platform window client area size (ignoring OS decorations such as OS title bar etc.)
-	Platform_GetWindowSize:           proc "c" (vp: ^Viewport) -> Vec2,                                                             // N . . . .  // Get platform window client area size
-	Platform_SetWindowFocus:          proc "c" (vp: ^Viewport),                                                                     // N . . . .  // Move window to front and set input focus
-	Platform_GetWindowFocus:          proc "c" (vp: ^Viewport) -> bool,                                                             // . . U . .  //
-	Platform_GetWindowMinimized:      proc "c" (vp: ^Viewport) -> bool,                                                             // N . . . .  // Get platform window minimized state. When minimized, we generally won't attempt to get/set size and contents will be culled more easily
-	Platform_SetWindowTitle:          proc "c" (vp: ^Viewport, str: cstring),                                                       // . . U . .  // Set platform window title (given an UTF-8 string)
-	Platform_SetWindowAlpha:          proc "c" (vp: ^Viewport, alpha: f32),                                                         // . . U . .  // (Optional) Setup global transparency (not per-pixel transparency)
-	Platform_UpdateWindow:            proc "c" (vp: ^Viewport),                                                                     // . . U . .  // (Optional) Called by UpdatePlatformWindows(). Optional hook to allow the platform backend from doing general book-keeping every frame.
-	Platform_RenderWindow:            proc "c" (vp: ^Viewport, render_arg: rawptr),                                                 // . . . R .  // (Optional) Main rendering (platform side! This is often unused, or just setting a "current" context for OpenGL bindings). 'render_arg' is the value passed to RenderPlatformWindowsDefault().
-	Platform_SwapBuffers:             proc "c" (vp: ^Viewport, render_arg: rawptr),                                                 // . . . R .  // (Optional) Call Present/SwapBuffers (platform side! This is often unused!). 'render_arg' is the value passed to RenderPlatformWindowsDefault().
-	Platform_GetWindowDpiScale:       proc "c" (vp: ^Viewport) -> f32,                                                              // N . . . .  // (Optional) [BETA] FIXME-DPI: DPI handling: Return DPI scale for this viewport. 1.0f = 96 DPI.
-	Platform_OnChangedViewport:       proc "c" (vp: ^Viewport),                                                                     // . F . . .  // (Optional) [BETA] FIXME-DPI: DPI handling: Called during Begin() every time the viewport we are outputting into changes, so backend has a chance to swap fonts to adjust style.
-	Platform_GetWindowWorkAreaInsets: proc "c" (vp: ^Viewport) -> Vec4,                                                             // N . . . .  // (Optional) [BETA] Get initial work area inset for the viewport (won't be covered by main menu bar, dockspace over viewport etc.). Default to (0,0),(0,0). 'safeAreaInsets' in iOS land, 'DisplayCutout' in Android land.
-	Platform_CreateVkSurface:         proc "c" (vp: ^Viewport, vk_inst: u64, vk_allocators: rawptr, out_vk_surface: ^u64) -> c.int, // (Optional) For a Vulkan Renderer to call into Platform code (since the surface creation needs to tie them both).
+	Platform_CreateWindow:              proc "c" (vp: ^Viewport),                                                                     // . . U . .  // Create a new platform window for the given viewport
+	Platform_DestroyWindow:             proc "c" (vp: ^Viewport),                                                                     // N . U . D  //
+	Platform_ShowWindow:                proc "c" (vp: ^Viewport),                                                                     // . . U . .  // Newly created windows are initially hidden so SetWindowPos/Size/Title can be called on them before showing the window
+	Platform_SetWindowPos:              proc "c" (vp: ^Viewport, pos: Vec2),                                                          // . . U . .  // Set platform window position (given the upper-left corner of client area)
+	Platform_GetWindowPos:              proc "c" (vp: ^Viewport) -> Vec2,                                                             // N . . . .  // (Use ImGuiPlatformIO_SetPlatform_GetWindowPos() to set this from C, otherwise you will likely encounter stack corruption)
+	Platform_SetWindowSize:             proc "c" (vp: ^Viewport, size: Vec2),                                                         // . . U . .  // Set platform window client area size (ignoring OS decorations such as OS title bar etc.)
+	Platform_GetWindowSize:             proc "c" (vp: ^Viewport) -> Vec2,                                                             // N . . . .  // Get platform window client area size (Use ImGuiPlatformIO_SetPlatform_GetWindowSize() to set this from C, otherwise you will likely encounter stack corruption)
+	Platform_GetWindowFramebufferScale: proc "c" (vp: ^Viewport) -> Vec2,                                                             // N . . . .  // Return viewport density. Always 1,1 on Windows, often 2,2 on Retina display on macOS/iOS. MUST BE INTEGER VALUES. (Use ImGuiPlatformIO_SetPlatform_GetWindowFramebufferScale() to set this from C, otherwise you will likely encounter stack corruption)
+	Platform_SetWindowFocus:            proc "c" (vp: ^Viewport),                                                                     // N . . . .  // Move window to front and set input focus
+	Platform_GetWindowFocus:            proc "c" (vp: ^Viewport) -> bool,                                                             // . . U . .  //
+	Platform_GetWindowMinimized:        proc "c" (vp: ^Viewport) -> bool,                                                             // N . . . .  // Get platform window minimized state. When minimized, we generally won't attempt to get/set size and contents will be culled more easily
+	Platform_SetWindowTitle:            proc "c" (vp: ^Viewport, str: cstring),                                                       // . . U . .  // Set platform window title (given an UTF-8 string)
+	Platform_SetWindowAlpha:            proc "c" (vp: ^Viewport, alpha: f32),                                                         // . . U . .  // (Optional) Setup global transparency (not per-pixel transparency)
+	Platform_UpdateWindow:              proc "c" (vp: ^Viewport),                                                                     // . . U . .  // (Optional) Called by UpdatePlatformWindows(). Optional hook to allow the platform backend from doing general book-keeping every frame.
+	Platform_RenderWindow:              proc "c" (vp: ^Viewport, render_arg: rawptr),                                                 // . . . R .  // (Optional) Main rendering (platform side! This is often unused, or just setting a "current" context for OpenGL bindings). 'render_arg' is the value passed to RenderPlatformWindowsDefault().
+	Platform_SwapBuffers:               proc "c" (vp: ^Viewport, render_arg: rawptr),                                                 // . . . R .  // (Optional) Call Present/SwapBuffers (platform side! This is often unused!). 'render_arg' is the value passed to RenderPlatformWindowsDefault().
+	Platform_GetWindowDpiScale:         proc "c" (vp: ^Viewport) -> f32,                                                              // N . . . .  // (Optional) [BETA] FIXME-DPI: DPI handling: Return DPI scale for this viewport. 1.0f = 96 DPI.
+	Platform_OnChangedViewport:         proc "c" (vp: ^Viewport),                                                                     // . F . . .  // (Optional) [BETA] FIXME-DPI: DPI handling: Called during Begin() every time the viewport we are outputting into changes, so backend has a chance to swap fonts to adjust style.
+	Platform_GetWindowWorkAreaInsets:   proc "c" (vp: ^Viewport) -> Vec4,                                                             // N . . . .  // (Optional) [BETA] Get initial work area inset for the viewport (won't be covered by main menu bar, dockspace over viewport etc.). Default to (0,0),(0,0). 'safeAreaInsets' in iOS land, 'DisplayCutout' in Android land. (Use ImGuiPlatformIO_SetPlatform_GetWindowWorkAreaInsets() to set this from C, otherwise you will likely encounter stack corruption)
+	Platform_CreateVkSurface:           proc "c" (vp: ^Viewport, vk_inst: u64, vk_allocators: rawptr, out_vk_surface: ^u64) -> c.int, // (Optional) For a Vulkan Renderer to call into Platform code (since the surface creation needs to tie them both).
 	// Renderer Backend functions (e.g. DirectX, OpenGL, Vulkan) ------------ Called by -----
 	Renderer_CreateWindow:  proc "c" (vp: ^Viewport),                     // . . U . .  // Create swap chain, frame buffers etc. (called after Platform_CreateWindow)
 	Renderer_DestroyWindow: proc "c" (vp: ^Viewport),                     // N . U . D  // Destroy swap chain, frame buffers etc. (called before Platform_DestroyWindow)
@@ -2001,6 +2195,9 @@ PlatformIO :: struct {
 	// - Updated by: app/backend. Update every frame to dynamically support changing monitor or DPI configuration.
 	// - Used by: dear imgui to query DPI info, clamp popups/tooltips within same monitor and not have them straddle monitors.
 	Monitors: Vector_PlatformMonitor,
+	// Textures list (the list is updated by calling ImGui::EndFrame or ImGui::Render)
+	// The ImGui_ImplXXXX_RenderDrawData() function of each backend generally access this via ImDrawData::Textures which points to this. The array is available here mostly because backends will want to destroy textures on shutdown.
+	Textures: Vector_TextureDataPtr, // List of textures used by Dear ImGui (most often 1) + contents of external texture list is automatically appended into this.
 	// Viewports list (the list is updated by calling ImGui::EndFrame or ImGui::Render)
 	// (in the future we will attempt to organize this feature to remove the need for a "main viewport")
 	Viewports: Vector_ViewportPtr, // Main viewports, followed by all secondary viewports.
@@ -2017,11 +2214,13 @@ PlatformMonitor :: struct {
 	PlatformHandle: rawptr, // Backend dependant data (e.g. HMONITOR, GLFWmonitor*, SDL Display Index, NSScreen*)
 }
 
-// (Optional) Support for IME (Input Method Editor) via the platform_io.Platform_SetImeDataFn() function.
+// (Optional) Support for IME (Input Method Editor) via the platform_io.Platform_SetImeDataFn() function. Handler is called during EndFrame().
 PlatformImeData :: struct {
-	WantVisible:     bool, // A widget wants the IME to be visible
-	InputPos:        Vec2, // Position of the input cursor
-	InputLineHeight: f32,  // Line height
+	WantVisible:     bool, // A widget wants the IME to be visible.
+	WantTextInput:   bool, // A widget wants text input, not necessarily IME to be visible. This is automatically set to the upcoming value of io.WantTextInput.
+	InputPos:        Vec2, // Position of input cursor (for IME).
+	InputLineHeight: f32,  // Line height (for IME).
+	ViewportId:      ID,   // ID of platform window/viewport.
 }
 
 
@@ -2030,6 +2229,7 @@ PlatformImeData :: struct {
 ////////////////////////////////////////////////////////////
 
 foreign lib {
+	@(link_name="ImTextureRef_GetTexID") TextureRef_GetTexID :: proc(self: ^TextureRef) -> TextureID --- // == (_TexData ? _TexData->TexID : _TexID) // Implemented below in the file.
 	// Context creation and access
 	// - Each context create its own ImFontAtlas by default. You may instance one yourself and pass it to CreateContext() to share a font atlas between contexts.
 	// - DLL users: heaps and globals are not shared across DLL boundaries! You will need to call SetCurrentContext() + SetAllocatorFunctions()
@@ -2045,7 +2245,7 @@ foreign lib {
 	@(link_name="ImGui_NewFrame")      NewFrame      :: proc()                --- // start a new Dear ImGui frame, you can submit any command from this point until Render()/EndFrame().
 	@(link_name="ImGui_EndFrame")      EndFrame      :: proc()                --- // ends the Dear ImGui frame. automatically called by Render(). If you don't need to render data (skipping rendering) you may call EndFrame() without Render()... but you'll have wasted CPU already! If you don't need to render, better to not create any windows and not call NewFrame() at all!
 	@(link_name="ImGui_Render")        Render        :: proc()                --- // ends the Dear ImGui frame, finalize the draw data. You can then get call GetDrawData().
-	@(link_name="ImGui_GetDrawData")   GetDrawData   :: proc() -> ^DrawData   --- // valid after Render() and until the next call to NewFrame(). this is what you have to render.
+	@(link_name="ImGui_GetDrawData")   GetDrawData   :: proc() -> ^DrawData   --- // valid after Render() and until the next call to NewFrame(). Call ImGui_ImplXXXX_RenderDrawData() function in your Renderer Backend to render.
 	// Demo, Debug, Information
 	@(link_name="ImGui_ShowDemoWindow")        ShowDemoWindow        :: proc(p_open: ^bool = nil)    --- // create Demo window. demonstrate most ImGui features. call this to learn about the library! try to make it always available in your application!
 	@(link_name="ImGui_ShowMetricsWindow")     ShowMetricsWindow     :: proc(p_open: ^bool = nil)    --- // create Metrics/Debugger window. display Dear ImGui internals: windows, draw commands, various internal state, etc.
@@ -2124,7 +2324,6 @@ foreign lib {
 	@(link_name="ImGui_SetWindowSize")                SetWindowSize                :: proc(size: Vec2, cond: Cond = {})                                                                             --- // (not recommended) set current window size - call within Begin()/End(). set to ImVec2(0, 0) to force an auto-fit. prefer using SetNextWindowSize(), as this may incur tearing and minor side-effects.
 	@(link_name="ImGui_SetWindowCollapsed")           SetWindowCollapsed           :: proc(collapsed: bool, cond: Cond = {})                                                                        --- // (not recommended) set current window collapsed state. prefer using SetNextWindowCollapsed().
 	@(link_name="ImGui_SetWindowFocus")               SetWindowFocus               :: proc()                                                                                                        --- // (not recommended) set current window to be focused / top-most. prefer using SetNextWindowFocus().
-	@(link_name="ImGui_SetWindowFontScale")           SetWindowFontScale           :: proc(scale: f32)                                                                                              --- // [OBSOLETE] set font scale. Adjust IO.FontGlobalScale if you want to scale all windows. This is an old API! For correct scaling, prefer to reload font + rebuild ImFontAtlas + call style.ScaleAllSizes().
 	@(link_name="ImGui_SetWindowPosStr")              SetWindowPosStr              :: proc(name: cstring, pos: Vec2, cond: Cond = {})                                                               --- // set named window position.
 	@(link_name="ImGui_SetWindowSizeStr")             SetWindowSizeStr             :: proc(name: cstring, size: Vec2, cond: Cond = {})                                                              --- // set named window size. set axis to 0.0f to force an auto-fit on this axis.
 	@(link_name="ImGui_SetWindowCollapsedStr")        SetWindowCollapsedStr        :: proc(name: cstring, collapsed: bool, cond: Cond = {})                                                         --- // set named window collapsed state
@@ -2142,9 +2341,28 @@ foreign lib {
 	@(link_name="ImGui_SetScrollHereY")    SetScrollHereY    :: proc(center_y_ratio: f32 = 0.5)               --- // adjust scrolling amount to make current cursor position visible. center_y_ratio=0.0: top, 0.5: center, 1.0: bottom. When using to make a "default/current item" visible, consider using SetItemDefaultFocus() instead.
 	@(link_name="ImGui_SetScrollFromPosX") SetScrollFromPosX :: proc(local_x: f32, center_x_ratio: f32 = 0.5) --- // adjust scrolling amount to make given position visible. Generally GetCursorStartPos() + offset to compute a valid position.
 	@(link_name="ImGui_SetScrollFromPosY") SetScrollFromPosY :: proc(local_y: f32, center_y_ratio: f32 = 0.5) --- // adjust scrolling amount to make given position visible. Generally GetCursorStartPos() + offset to compute a valid position.
+	// Parameters stacks (font)
+	//  - PushFont(font, 0.0f)                       // Change font and keep current size
+	//  - PushFont(NULL, 20.0f)                      // Keep font and change current size
+	//  - PushFont(font, 20.0f)                      // Change font and set size to 20.0f
+	//  - PushFont(font, style.FontSizeBase * 2.0f)  // Change font and set size to be twice bigger than current size.
+	//  - PushFont(font, font->LegacySize)           // Change font and set size to size passed to AddFontXXX() function. Same as pre-1.92 behavior.
+	// *IMPORTANT* before 1.92, fonts had a single size. They can now be dynamically be adjusted.
+	//  - In 1.92 we have REMOVED the single parameter version of PushFont() because it seems like the easiest way to provide an error-proof transition.
+	//  - PushFont(font) before 1.92 = PushFont(font, font->LegacySize) after 1.92          // Use default font size as passed to AddFontXXX() function.
+	// *IMPORTANT* global scale factors are applied over the provided size.
+	//  - Global scale factors are: 'style.FontScaleMain', 'style.FontScaleDpi' and maybe more.
+	// -  If you want to apply a factor to the _current_ font size:
+	//  - CORRECT:   PushFont(NULL, style.FontSizeBase)         // use current unscaled size    == does nothing
+	//  - CORRECT:   PushFont(NULL, style.FontSizeBase * 2.0f)  // use current unscaled size x2 == make text twice bigger
+	//  - INCORRECT: PushFont(NULL, GetFontSize())              // INCORRECT! using size after global factors already applied == GLOBAL SCALING FACTORS WILL APPLY TWICE!
+	//  - INCORRECT: PushFont(NULL, GetFontSize() * 2.0f)       // INCORRECT! using size after global factors already applied == GLOBAL SCALING FACTORS WILL APPLY TWICE!
+	@(link_name="ImGui_PushFontFloat") PushFontFloat :: proc(font: ^Font, font_size_base_unscaled: f32) --- // Use NULL as a shortcut to keep current font. Use 0.0f to keep current size.
+	@(link_name="ImGui_PopFont")       PopFont       :: proc()                                          ---
+	@(link_name="ImGui_GetFont")       GetFont       :: proc() -> ^Font                                 --- // get current font
+	@(link_name="ImGui_GetFontSize")   GetFontSize   :: proc() -> f32                                   --- // get current scaled font size (= height in pixels). AFTER global scale factors applied. *IMPORTANT* DO NOT PASS THIS VALUE TO PushFont()! Use ImGui::GetStyle().FontSizeBase to get value before global scale factors.
+	@(link_name="ImGui_GetFontBaked")  GetFontBaked  :: proc() -> ^FontBaked                            --- // get current font bound at current size // == GetFont()->GetFontBaked(GetFontSize())
 	// Parameters stacks (shared)
-	@(link_name="ImGui_PushFont")             PushFont             :: proc(font: ^Font)                      --- // use NULL as a shortcut to push default font
-	@(link_name="ImGui_PopFont")              PopFont              :: proc()                                 ---
 	@(link_name="ImGui_PushStyleColor")       PushStyleColor       :: proc(idx: Col, col: u32)               --- // modify a style color. always use this if you modify the style after NewFrame().
 	@(link_name="ImGui_PushStyleColorImVec4") PushStyleColorImVec4 :: proc(idx: Col, col: Vec4)              ---
 	@(link_name="ImGui_PopStyleColor")        PopStyleColor        :: proc(count: c.int = 1)                 ---
@@ -2164,8 +2382,6 @@ foreign lib {
 	@(link_name="ImGui_PopTextWrapPos")   PopTextWrapPos   :: proc()                            ---
 	// Style read access
 	// - Use the ShowStyleEditor() function to interactively see/edit the colors.
-	@(link_name="ImGui_GetFont")                GetFont                :: proc() -> ^Font                             --- // get current font
-	@(link_name="ImGui_GetFontSize")            GetFontSize            :: proc() -> f32                               --- // get current font size (= height in pixels) of current font with current scale applied
 	@(link_name="ImGui_GetFontTexUvWhitePixel") GetFontTexUvWhitePixel :: proc() -> Vec2                              --- // get UV coordinate for a white pixel, useful to draw custom shapes via the ImDrawList API
 	@(link_name="ImGui_GetColorU32")            GetColorU32            :: proc(idx: Col, alpha_mul: f32 = 1.0) -> u32 --- // retrieve given style color with style alpha applied and optional extra alpha multiplier, packed as a 32-bit value suitable for ImDrawList
 	@(link_name="ImGui_GetColorU32ImVec4")      GetColorU32ImVec4      :: proc(col: Vec4) -> u32                      --- // retrieve given color with style alpha applied, packed as a 32-bit value suitable for ImDrawList
@@ -2250,15 +2466,16 @@ foreign lib {
 	@(link_name="ImGui_ProgressBar")          ProgressBar          :: proc(fraction: f32, size_arg: Vec2 = {-min(f32), 0}, overlay: cstring = nil) ---
 	@(link_name="ImGui_Bullet")               Bullet               :: proc()                                                                       --- // draw a small circle + keep the cursor on the same line. advance cursor x position by GetTreeNodeToLabelSpacing(), same distance that TreeNode() uses
 	@(link_name="ImGui_TextLink")             TextLink             :: proc(label: cstring) -> bool                                                 --- // hyperlink text button, return true when clicked
-	@(link_name="ImGui_TextLinkOpenURL")      TextLinkOpenURL      :: proc(label: cstring, url: cstring = nil)                                     --- // hyperlink text button, automatically open file/url when clicked
+	@(link_name="ImGui_TextLinkOpenURL")      TextLinkOpenURL      :: proc(label: cstring, url: cstring = nil) -> bool                             --- // hyperlink text button, automatically open file/url when clicked
 	// Widgets: Images
-	// - Read about ImTextureID here: https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples
+	// - Read about ImTextureID/ImTextureRef  here: https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples
 	// - 'uv0' and 'uv1' are texture coordinates. Read about them from the same link above.
 	// - Image() pads adds style.ImageBorderSize on each side, ImageButton() adds style.FramePadding on each side.
 	// - ImageButton() draws a background based on regular Button() color + optionally an inner background if specified.
-	@(link_name="ImGui_Image")       Image       :: proc(user_texture_id: TextureID, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1})                                                                                      ---
-	@(link_name="ImGui_ImageWithBg") ImageWithBg :: proc(user_texture_id: TextureID, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1}, bg_col: Vec4 = {0, 0, 0, 0}, tint_col: Vec4 = {1, 1, 1, 1})                          ---
-	@(link_name="ImGui_ImageButton") ImageButton :: proc(str_id: cstring, user_texture_id: TextureID, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1}, bg_col: Vec4 = {0, 0, 0, 0}, tint_col: Vec4 = {1, 1, 1, 1}) -> bool ---
+	// - An obsolete version of Image(), before 1.91.9 (March 2025), had a 'tint_col' parameter which is now supported by the ImageWithBg() function.
+	@(link_name="ImGui_Image")       Image       :: proc(tex_ref: TextureRef, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1})                                                                                      ---
+	@(link_name="ImGui_ImageWithBg") ImageWithBg :: proc(tex_ref: TextureRef, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1}, bg_col: Vec4 = {0, 0, 0, 0}, tint_col: Vec4 = {1, 1, 1, 1})                          ---
+	@(link_name="ImGui_ImageButton") ImageButton :: proc(str_id: cstring, tex_ref: TextureRef, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1}, bg_col: Vec4 = {0, 0, 0, 0}, tint_col: Vec4 = {1, 1, 1, 1}) -> bool ---
 	// Widgets: Combo Box (Dropdown)
 	// - The BeginCombo()/EndCombo() api allows you to manage your contents and selection state however you want it, by creating e.g. Selectable() items.
 	// - The old Combo() api are helpers over BeginCombo()/EndCombo() which are kept available for convenience purpose. This is analogous to how ListBox are created.
@@ -2373,7 +2590,7 @@ foreign lib {
 	// - This is essentially a thin wrapper to using BeginChild/EndChild with the ImGuiChildFlags_FrameStyle flag for stylistic changes + displaying a label.
 	// - If you don't need a label you can probably simply use BeginChild() with the ImGuiChildFlags_FrameStyle flag for the same result.
 	// - You can submit contents and manage your selection state however you want it, by creating e.g. Selectable() or any other items.
-	// - The simplified/old ListBox() api are helpers over BeginListBox()/EndListBox() which are kept available for convenience purpose. This is analoguous to how Combos are created.
+	// - The simplified/old ListBox() api are helpers over BeginListBox()/EndListBox() which are kept available for convenience purpose. This is analogous to how Combos are created.
 	// - Choose frame width:   size.x > 0.0f: custom  /  size.x < 0.0f or -FLT_MIN: right-align   /  size.x = 0.0f (default): use current ItemWidth
 	// - Choose frame height:  size.y > 0.0f: custom  /  size.y < 0.0f or -FLT_MIN: bottom-align  /  size.y = 0.0f (default): arbitrary default height which can fit ~7 items
 	@(link_name="ImGui_BeginListBox")    BeginListBox    :: proc(label: cstring, size: Vec2 = {0, 0}) -> bool                                                                                                                                   --- // open a framed scrolling region
@@ -2498,7 +2715,7 @@ foreign lib {
 	@(link_name="ImGui_TableGetSortSpecs")     TableGetSortSpecs     :: proc() -> ^TableSortSpecs                                     --- // get latest sort specs for the table (NULL if not sorting).  Lifetime: don't hold on this pointer over multiple frames or past any subsequent call to BeginTable().
 	@(link_name="ImGui_TableGetColumnCount")   TableGetColumnCount   :: proc() -> c.int                                               --- // return number of columns (value passed to BeginTable)
 	@(link_name="ImGui_TableGetColumnIndex")   TableGetColumnIndex   :: proc() -> c.int                                               --- // return current column index.
-	@(link_name="ImGui_TableGetRowIndex")      TableGetRowIndex      :: proc() -> c.int                                               --- // return current row index.
+	@(link_name="ImGui_TableGetRowIndex")      TableGetRowIndex      :: proc() -> c.int                                               --- // return current row index (header rows are accounted for)
 	@(link_name="ImGui_TableGetColumnName")    TableGetColumnName    :: proc(column_n: c.int = -1) -> cstring                         --- // return "" if column didn't have a name declared by TableSetupColumn(). Pass -1 to use current column.
 	@(link_name="ImGui_TableGetColumnFlags")   TableGetColumnFlags   :: proc(column_n: c.int = -1) -> TableColumnFlags                --- // return column flags so you can query their Enabled/Visible/Sorted/Hovered status flags. Pass -1 to use current column.
 	@(link_name="ImGui_TableSetColumnEnabled") TableSetColumnEnabled :: proc(column_n: c.int, v: bool)                                --- // change user accessible enabled/disabled state of a column. Set to false to hide the column. User can use the context menu to change this themselves (right-click in headers, or right-click in columns body with ImGuiTableFlags_ContextMenuInBody)
@@ -2523,18 +2740,24 @@ foreign lib {
 	@(link_name="ImGui_TabItemButton")    TabItemButton    :: proc(label: cstring, flags: TabItemFlags = {}) -> bool                      --- // create a Tab behaving like a button. return true when clicked. cannot be selected in the tab bar.
 	@(link_name="ImGui_SetTabItemClosed") SetTabItemClosed :: proc(tab_or_docked_window_label: cstring)                                   --- // notify TabBar or Docking system of a closed tab/window ahead (useful to reduce visual flicker on reorderable tab bars). For tab-bar: call after BeginTabBar() and before Tab submissions. Otherwise call with a window name.
 	// Docking
-	// [BETA API] Enable with io.ConfigFlags |= ImGuiConfigFlags_DockingEnable.
-	// Note: You can use most Docking facilities without calling any API. You DO NOT need to call DockSpace() to use Docking!
-	// - Drag from window title bar or their tab to dock/undock. Hold SHIFT to disable docking.
-	// - Drag from window menu button (upper-left button) to undock an entire node (all windows).
-	// - When io.ConfigDockingWithShift == true, you instead need to hold SHIFT to enable docking.
-	// About dockspaces:
-	// - Use DockSpaceOverViewport() to create a window covering the screen or a specific viewport + a dockspace inside it.
-	//   This is often used with ImGuiDockNodeFlags_PassthruCentralNode to make it transparent.
-	// - Use DockSpace() to create an explicit dock node _within_ an existing window. See Docking demo for details.
-	// - Important: Dockspaces need to be submitted _before_ any window they can host. Submit it early in your frame!
-	// - Important: Dockspaces need to be kept alive if hidden, otherwise windows docked into it will be undocked.
-	//   e.g. if you have multiple tabs with a dockspace inside each tab: submit the non-visible dockspaces with ImGuiDockNodeFlags_KeepAliveOnly.
+	// - Read https://github.com/ocornut/imgui/wiki/Docking for details.
+	// - Enable with io.ConfigFlags |= ImGuiConfigFlags_DockingEnable.
+	// - You can use most Docking facilities without calling any API. You don't necessarily need to call a DockSpaceXXX function to use Docking!
+	//   - Drag from window title bar or their tab to dock/undock. Hold SHIFT to disable docking.
+	//   - Drag from window menu button (upper-left button) to undock an entire node (all windows).
+	//   - When io.ConfigDockingWithShift == true, you instead need to hold SHIFT to enable docking.
+	// - Dockspaces:
+	//   - If you want to dock windows into the edge of your screen, most application can simply call DockSpaceOverViewport():
+	//     e.g. ImGui::NewFrame(); then ImGui::DockSpaceOverViewport();  // Create a dockspace in main viewport.
+	//      or: ImGui::NewFrame(); then ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);  // Create a dockspace in main viewport, where central node is transparent.
+	//   - A dockspace is an explicit dock node within an existing window.
+	//   - DockSpaceOverViewport() basically creates an invisible window covering a viewport, and submit a DockSpace() into it.
+	//   - IMPORTANT: Dockspaces need to be submitted _before_ any window they can host. Submit them early in your frame!
+	//   - IMPORTANT: Dockspaces need to be kept alive if hidden, otherwise windows docked into it will be undocked.
+	//     If you have e.g. multiple tabs with a dockspace inside each tab: submit the non-visible dockspaces with ImGuiDockNodeFlags_KeepAliveOnly.
+	// - Programmatic docking:
+	//   - There is no public API yet other than the very limited SetNextWindowDockID() function. Sorry for that!
+	//   - Read https://github.com/ocornut/imgui/wiki/Docking for examples of how to use current internal API.
 	@(link_name="ImGui_DockSpace")             DockSpace             :: proc(dockspace_id: ID, size: Vec2 = {0, 0}, flags: DockNodeFlags = {}, window_class: ^WindowClass = nil) -> ID            ---
 	@(link_name="ImGui_DockSpaceOverViewport") DockSpaceOverViewport :: proc(dockspace_id: ID = {}, viewport: ^Viewport = nil, flags: DockNodeFlags = {}, window_class: ^WindowClass = nil) -> ID ---
 	@(link_name="ImGui_SetNextWindowDockID")   SetNextWindowDockID   :: proc(dock_id: ID, cond: Cond = {})                                                                                        --- // set next window dock id
@@ -2636,8 +2859,8 @@ foreign lib {
 	@(link_name="ImGui_SetNextFrameWantCaptureKeyboard") SetNextFrameWantCaptureKeyboard :: proc(want_capture_keyboard: bool)                     --- // Override io.WantCaptureKeyboard flag next frame (said flag is left for your application to handle, typically when true it instructs your app to ignore inputs). e.g. force capture keyboard when your widget is being hovered. This is equivalent to setting "io.WantCaptureKeyboard = want_capture_keyboard"; after the next NewFrame() call.
 	// Inputs Utilities: Shortcut Testing & Routing [BETA]
 	// - ImGuiKeyChord = a ImGuiKey + optional ImGuiMod_Alt/ImGuiMod_Ctrl/ImGuiMod_Shift/ImGuiMod_Super.
-	//       ImGuiKey_C                          // Accepted by functions taking ImGuiKey or ImGuiKeyChord arguments)
-	//       ImGuiMod_Ctrl | ImGuiKey_C          // Accepted by functions taking ImGuiKeyChord arguments)
+	//       ImGuiKey_C                          // Accepted by functions taking ImGuiKey or ImGuiKeyChord arguments
+	//       ImGuiMod_Ctrl | ImGuiKey_C          // Accepted by functions taking ImGuiKeyChord arguments
 	//   only ImGuiMod_XXX values are legal to combine with an ImGuiKey. You CANNOT combine two ImGuiKey values.
 	// - The general idea is that several callers may register interest in a shortcut, and only one owner gets it.
 	//      Parent   -> call Shortcut(Ctrl+S)    // When Parent is focused, Parent gets the shortcut.
@@ -2678,7 +2901,7 @@ foreign lib {
 	@(link_name="ImGui_ResetMouseDragDelta")              ResetMouseDragDelta              :: proc(button: MouseButton = {})                                     --- //
 	@(link_name="ImGui_GetMouseCursor")                   GetMouseCursor                   :: proc() -> MouseCursor                                              --- // get desired mouse cursor shape. Important: reset in ImGui::NewFrame(), this is updated during the frame. valid before Render(). If you use software rendering by setting io.MouseDrawCursor ImGui will render those for you
 	@(link_name="ImGui_SetMouseCursor")                   SetMouseCursor                   :: proc(cursor_type: MouseCursor)                                     --- // set desired mouse cursor shape
-	@(link_name="ImGui_SetNextFrameWantCaptureMouse")     SetNextFrameWantCaptureMouse     :: proc(want_capture_mouse: bool)                                     --- // Override io.WantCaptureMouse flag next frame (said flag is left for your application to handle, typical when true it instucts your app to ignore inputs). This is equivalent to setting "io.WantCaptureMouse = want_capture_mouse;" after the next NewFrame() call.
+	@(link_name="ImGui_SetNextFrameWantCaptureMouse")     SetNextFrameWantCaptureMouse     :: proc(want_capture_mouse: bool)                                     --- // Override io.WantCaptureMouse flag next frame (said flag is left for your application to handle, typical when true it instructs your app to ignore inputs). This is equivalent to setting "io.WantCaptureMouse = want_capture_mouse;" after the next NewFrame() call.
 	// Clipboard Utilities
 	// - Also see the LogToClipboard() function to capture GUI into clipboard, or easily output text data to the clipboard.
 	@(link_name="ImGui_GetClipboardText") GetClipboardText :: proc() -> cstring   ---
@@ -2709,14 +2932,18 @@ foreign lib {
 	// (Optional) Platform/OS interface for multi-viewport support
 	// Read comments around the ImGuiPlatformIO structure for more details.
 	// Note: You may use GetWindowViewport() to get the current viewport of the current window.
-	@(link_name="ImGui_UpdatePlatformWindows")        UpdatePlatformWindows        :: proc()                                                                     --- // call in main loop. will call CreateWindow/ResizeWindow/etc. platform functions for each secondary viewport, and DestroyWindow for each inactive viewport.
-	@(link_name="ImGui_RenderPlatformWindowsDefault") RenderPlatformWindowsDefault :: proc(platform_render_arg: rawptr = nil, renderer_render_arg: rawptr = nil) --- // call in main loop. will call RenderWindow/SwapBuffers platform functions for each secondary viewport which doesn't have the ImGuiViewportFlags_Minimized flag set. May be reimplemented by user for custom rendering needs.
-	@(link_name="ImGui_DestroyPlatformWindows")       DestroyPlatformWindows       :: proc()                                                                     --- // call DestroyWindow platform functions for all viewports. call from backend Shutdown() if you need to close platform windows before imgui shutdown. otherwise will be called by DestroyContext().
-	@(link_name="ImGui_FindViewportByID")             FindViewportByID             :: proc(id: ID) -> ^Viewport                                                  --- // this is a helper for backends.
-	@(link_name="ImGui_FindViewportByPlatformHandle") FindViewportByPlatformHandle :: proc(platform_handle: rawptr) -> ^Viewport                                 --- // this is a helper for backends. the type platform_handle is decided by the backend (e.g. HWND, MyWindow*, GLFWwindow* etc.)
-	@(link_name="ImVector_Construct")                 Vector_Construct             :: proc(vector: rawptr)                                                       --- // Construct a zero-size ImVector<> (of any type). This is primarily useful when calling ImFontGlyphRangesBuilder_BuildRanges()
-	@(link_name="ImVector_Destruct")                  Vector_Destruct              :: proc(vector: rawptr)                                                       --- // Destruct an ImVector<> (of any type). Important: Frees the vector memory but does not call destructors on contained objects (if they have them)
-	@(link_name="ImGuiStyle_ScaleAllSizes")           Style_ScaleAllSizes          :: proc(self: ^Style, scale_factor: f32)                                      ---
+	@(link_name="ImGui_UpdatePlatformWindows")                           UpdatePlatformWindows                            :: proc()                                                                       --- // call in main loop. will call CreateWindow/ResizeWindow/etc. platform functions for each secondary viewport, and DestroyWindow for each inactive viewport.
+	@(link_name="ImGui_RenderPlatformWindowsDefault")                    RenderPlatformWindowsDefault                     :: proc(platform_render_arg: rawptr = nil, renderer_render_arg: rawptr = nil)   --- // call in main loop. will call RenderWindow/SwapBuffers platform functions for each secondary viewport which doesn't have the ImGuiViewportFlags_Minimized flag set. May be reimplemented by user for custom rendering needs.
+	@(link_name="ImGui_DestroyPlatformWindows")                          DestroyPlatformWindows                           :: proc()                                                                       --- // call DestroyWindow platform functions for all viewports. call from backend Shutdown() if you need to close platform windows before imgui shutdown. otherwise will be called by DestroyContext().
+	@(link_name="ImGui_FindViewportByID")                                FindViewportByID                                 :: proc(id: ID) -> ^Viewport                                                    --- // this is a helper for backends.
+	@(link_name="ImGui_FindViewportByPlatformHandle")                    FindViewportByPlatformHandle                     :: proc(platform_handle: rawptr) -> ^Viewport                                   --- // this is a helper for backends. the type platform_handle is decided by the backend (e.g. HWND, MyWindow*, GLFWwindow* etc.)
+	@(link_name="ImVector_Construct")                                    Vector_Construct                                 :: proc(vector: rawptr)                                                         --- // Construct a zero-size ImVector<> (of any type). This is primarily useful when calling ImFontGlyphRangesBuilder_BuildRanges()
+	@(link_name="ImVector_Destruct")                                     Vector_Destruct                                  :: proc(vector: rawptr)                                                         --- // Destruct an ImVector<> (of any type). Important: Frees the vector memory but does not call destructors on contained objects (if they have them)
+	@(link_name="ImGuiPlatformIO_SetPlatform_GetWindowWorkAreaInsets")   PlatformIO_SetPlatform_GetWindowWorkAreaInsets   :: proc(getWindowWorkAreaInsetsFunc: proc "c" (vp: ^Viewport, result: ^Vec4))   --- // Set ImGuiPlatformIO::Platform_GetWindowWorkAreaInsets in a C-compatible mannner
+	@(link_name="ImGuiPlatformIO_SetPlatform_GetWindowFramebufferScale") PlatformIO_SetPlatform_GetWindowFramebufferScale :: proc(getWindowFramebufferScaleFunc: proc "c" (vp: ^Viewport, result: ^Vec2)) --- // Set ImGuiPlatformIO::Platform_GetWindowFramebufferScale in a C-compatible mannner
+	@(link_name="ImGuiPlatformIO_SetPlatform_GetWindowPos")              PlatformIO_SetPlatform_GetWindowPos              :: proc(getWindowPosFunc: proc "c" (vp: ^Viewport, result: ^Vec2))              --- // Set ImGuiPlatformIO::Platform_GetWindowPos in a C-compatible mannner
+	@(link_name="ImGuiPlatformIO_SetPlatform_GetWindowSize")             PlatformIO_SetPlatform_GetWindowSize             :: proc(getWindowSizeFunc: proc "c" (vp: ^Viewport, result: ^Vec2))             --- // Set ImGuiPlatformIO::Platform_GetWindowSize in a C-compatible mannner
+	@(link_name="ImGuiStyle_ScaleAllSizes")                              Style_ScaleAllSizes                              :: proc(self: ^Style, scale_factor: f32)                                        --- // Scale all spacing/padding/thickness values. Do not scale fonts.
 	// Input Functions
 	@(link_name="ImGuiIO_AddKeyEvent")                       IO_AddKeyEvent                       :: proc(self: ^IO, key: Key, down: bool)                                                                     --- // Queue a new key down/up event. Key should be "translated" (as in, generally ImGuiKey_A matches the key end-user would use to emit an 'A' character)
 	@(link_name="ImGuiIO_AddKeyAnalogEvent")                 IO_AddKeyAnalogEvent                 :: proc(self: ^IO, key: Key, down: bool, v: f32)                                                             --- // Queue a new key down/up event for analog values (e.g. ImGuiKey_Gamepad_ values). Dead-zones should be handled by the backend.
@@ -2745,7 +2972,7 @@ foreign lib {
 	@(link_name="ImGuiPayload_IsPreview")                    Payload_IsPreview                    :: proc(self: ^Payload) -> bool                                                                              ---
 	@(link_name="ImGuiPayload_IsDelivery")                   Payload_IsDelivery                   :: proc(self: ^Payload) -> bool                                                                              ---
 	@(link_name="ImGuiTextFilter_ImGuiTextRange_empty")      TextFilter_ImGuiTextRange_empty      :: proc(self: ^TextFilter_ImGuiTextRange) -> bool                                                            ---
-	@(link_name="ImGuiTextFilter_ImGuiTextRange_split")      TextFilter_ImGuiTextRange_split      :: proc(self: ^TextFilter_ImGuiTextRange, separator: c.char, out: ^Vector_TextFilter_ImGuiTextRange)         ---
+	@(link_name="ImGuiTextFilter_ImGuiTextRange_split")      TextFilter_ImGuiTextRange_split      :: proc(self: ^TextFilter_ImGuiTextRange, separator: c.char, out: ^Vector_TextRange)                         ---
 	@(link_name="ImGuiTextFilter_Draw")                      TextFilter_Draw                      :: proc(self: ^TextFilter, label: cstring = "Filter (inc,-exc)", width: f32 = 0.0) -> bool                   --- // Helper calling InputText+Build
 	@(link_name="ImGuiTextFilter_PassFilter")                TextFilter_PassFilter                :: proc(self: ^TextFilter, text: cstring, text_end: cstring = nil) -> bool                                   ---
 	@(link_name="ImGuiTextFilter_Build")                     TextFilter_Build                     :: proc(self: ^TextFilter)                                                                                   ---
@@ -2795,9 +3022,7 @@ foreign lib {
 	// Seek cursor toward given item. This is automatically called while stepping.
 	// - The only reason to call this is: you can use ImGuiListClipper::Begin(INT_MAX) if you don't know item count ahead of time.
 	// - In this case, after all steps are done, you'll want to call SeekCursorForItem(item_count).
-	@(link_name="ImGuiListClipper_SeekCursorForItem")          ListClipper_SeekCursorForItem          :: proc(self: ^ListClipper, item_index: c.int)                  ---
-	@(link_name="ImGuiListClipper_IncludeRangeByIndices")      ListClipper_IncludeRangeByIndices      :: proc(self: ^ListClipper, item_begin: c.int, item_end: c.int) --- // [renamed in 1.89.9]
-	@(link_name="ImGuiListClipper_ForceDisplayRangeByIndices") ListClipper_ForceDisplayRangeByIndices :: proc(self: ^ListClipper, item_begin: c.int, item_end: c.int) --- // [renamed in 1.89.6]
+	@(link_name="ImGuiListClipper_SeekCursorForItem") ListClipper_SeekCursorForItem :: proc(self: ^ListClipper, item_index: c.int) ---
 	// FIXME-OBSOLETE: May need to obsolete/cleanup those helpers.
 	@(link_name="ImColor_SetHSV")                                   Color_SetHSV                                :: proc(self: ^Color, h: f32, s: f32, v: f32, a: f32 = 1.0)                    ---
 	@(link_name="ImColor_HSV")                                      Color_HSV                                   :: proc(h: f32, s: f32, v: f32, a: f32 = 1.0) -> Color                         ---
@@ -2810,7 +3035,8 @@ foreign lib {
 	@(link_name="ImGuiSelectionBasicStorage_GetStorageIdFromIndex") SelectionBasicStorage_GetStorageIdFromIndex :: proc(self: ^SelectionBasicStorage, idx: c.int) -> ID                        --- // Convert index to item id based on provided adapter.
 	@(link_name="ImGuiSelectionExternalStorage_ApplyRequests")      SelectionExternalStorage_ApplyRequests      :: proc(self: ^SelectionExternalStorage, ms_io: ^MultiSelectIO)                --- // Apply selection requests by using AdapterSetItemSelected() calls
 	// Since 1.83: returns ImTextureID associated with this draw call. Warning: DO NOT assume this is always same as 'TextureId' (we will change this function for an upcoming feature)
-	@(link_name="ImDrawCmd_GetTexID")                   DrawCmd_GetTexID                   :: proc(self: ^DrawCmd) -> TextureID                                                                               ---
+	// Since 1.92: removed ImDrawCmd::TextureId field, the getter function must be used!
+	@(link_name="ImDrawCmd_GetTexID")                   DrawCmd_GetTexID                   :: proc(self: ^DrawCmd) -> TextureID                                                                               --- // == (TexRef._TexData ? TexRef._TexData->TexID : TexRef._TexID)
 	@(link_name="ImDrawListSplitter_Clear")             DrawListSplitter_Clear             :: proc(self: ^DrawListSplitter)                                                                                   --- // Do not clear Channels[] so our allocations are reused next frame
 	@(link_name="ImDrawListSplitter_ClearFreeMemory")   DrawListSplitter_ClearFreeMemory   :: proc(self: ^DrawListSplitter)                                                                                   ---
 	@(link_name="ImDrawListSplitter_Split")             DrawListSplitter_Split             :: proc(self: ^DrawListSplitter, draw_list: ^DrawList, count: c.int)                                               ---
@@ -2819,8 +3045,8 @@ foreign lib {
 	@(link_name="ImDrawList_PushClipRect")              DrawList_PushClipRect              :: proc(self: ^DrawList, clip_rect_min: Vec2, clip_rect_max: Vec2, intersect_with_current_clip_rect: bool = false) --- // Render-level scissoring. This is passed down to your render function but not used for CPU-side coarse clipping. Prefer using higher-level ImGui::PushClipRect() to affect logic (hit-testing and widget culling)
 	@(link_name="ImDrawList_PushClipRectFullScreen")    DrawList_PushClipRectFullScreen    :: proc(self: ^DrawList)                                                                                           ---
 	@(link_name="ImDrawList_PopClipRect")               DrawList_PopClipRect               :: proc(self: ^DrawList)                                                                                           ---
-	@(link_name="ImDrawList_PushTextureID")             DrawList_PushTextureID             :: proc(self: ^DrawList, texture_id: TextureID)                                                                    ---
-	@(link_name="ImDrawList_PopTextureID")              DrawList_PopTextureID              :: proc(self: ^DrawList)                                                                                           ---
+	@(link_name="ImDrawList_PushTexture")               DrawList_PushTexture               :: proc(self: ^DrawList, tex_ref: TextureRef)                                                                      ---
+	@(link_name="ImDrawList_PopTexture")                DrawList_PopTexture                :: proc(self: ^DrawList)                                                                                           ---
 	@(link_name="ImDrawList_GetClipRectMin")            DrawList_GetClipRectMin            :: proc(self: ^DrawList) -> Vec2                                                                                   ---
 	@(link_name="ImDrawList_GetClipRectMax")            DrawList_GetClipRectMax            :: proc(self: ^DrawList) -> Vec2                                                                                   ---
 	// Primitives
@@ -2855,12 +3081,12 @@ foreign lib {
 	@(link_name="ImDrawList_AddConvexPolyFilled")  DrawList_AddConvexPolyFilled  :: proc(self: ^DrawList, points: ^Vec2, num_points: c.int, col: u32)                                   ---
 	@(link_name="ImDrawList_AddConcavePolyFilled") DrawList_AddConcavePolyFilled :: proc(self: ^DrawList, points: ^Vec2, num_points: c.int, col: u32)                                   ---
 	// Image primitives
-	// - Read FAQ to understand what ImTextureID is.
+	// - Read FAQ to understand what ImTextureID/ImTextureRef are.
 	// - "p_min" and "p_max" represent the upper-left and lower-right corners of the rectangle.
 	// - "uv_min" and "uv_max" represent the normalized texture coordinates to use for those corners. Using (0,0)->(1,1) texture coordinates will generally display the entire texture.
-	@(link_name="ImDrawList_AddImage")        DrawList_AddImage        :: proc(self: ^DrawList, user_texture_id: TextureID, p_min: Vec2, p_max: Vec2, uv_min: Vec2 = {0, 0}, uv_max: Vec2 = {1, 1}, col: u32 = 0xff_ff_ff_ff)                                                 ---
-	@(link_name="ImDrawList_AddImageQuad")    DrawList_AddImageQuad    :: proc(self: ^DrawList, user_texture_id: TextureID, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, uv1: Vec2 = {0, 0}, uv2: Vec2 = {1, 0}, uv3: Vec2 = {1, 1}, uv4: Vec2 = {0, 1}, col: u32 = 0xff_ff_ff_ff) ---
-	@(link_name="ImDrawList_AddImageRounded") DrawList_AddImageRounded :: proc(self: ^DrawList, user_texture_id: TextureID, p_min: Vec2, p_max: Vec2, uv_min: Vec2, uv_max: Vec2, col: u32, rounding: f32, flags: DrawFlags = {})                                             ---
+	@(link_name="ImDrawList_AddImage")        DrawList_AddImage        :: proc(self: ^DrawList, tex_ref: TextureRef, p_min: Vec2, p_max: Vec2, uv_min: Vec2 = {0, 0}, uv_max: Vec2 = {1, 1}, col: u32 = 0xff_ff_ff_ff)                                                 ---
+	@(link_name="ImDrawList_AddImageQuad")    DrawList_AddImageQuad    :: proc(self: ^DrawList, tex_ref: TextureRef, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, uv1: Vec2 = {0, 0}, uv2: Vec2 = {1, 0}, uv3: Vec2 = {1, 1}, uv4: Vec2 = {0, 1}, col: u32 = 0xff_ff_ff_ff) ---
+	@(link_name="ImDrawList_AddImageRounded") DrawList_AddImageRounded :: proc(self: ^DrawList, tex_ref: TextureRef, p_min: Vec2, p_max: Vec2, uv_min: Vec2, uv_max: Vec2, col: u32, rounding: f32, flags: DrawFlags = {})                                             ---
 	// Stateful path API, add points then finish with PathFillConvex() or PathStroke()
 	// - Important: filled shapes must always use clockwise winding order! The anti-aliasing fringe depends on it. Counter-clockwise shapes will have "inward" anti-aliasing.
 	//   so e.g. 'PathArcTo(center, radius, PI * -0.5f, PI)' is ok, whereas 'PathArcTo(center, radius, PI, PI * -0.5f)' won't have correct anti-aliasing when followed by PathFillConvex().
@@ -2888,7 +3114,7 @@ foreign lib {
 	@(link_name="ImDrawList_AddCallback") DrawList_AddCallback :: proc(self: ^DrawList, callback: DrawCallback, userdata: rawptr, userdata_size: c.size_t = {}) ---
 	// Advanced: Miscellaneous
 	@(link_name="ImDrawList_AddDrawCmd")  DrawList_AddDrawCmd  :: proc(self: ^DrawList)              --- // This is useful if you need to forcefully create a new draw call (to allow for dependent rendering / blending). Otherwise primitives are merged into the same draw-call as much as possible
-	@(link_name="ImDrawList_CloneOutput") DrawList_CloneOutput :: proc(self: ^DrawList) -> ^DrawList --- // Create a clone of the CmdBuffer/IdxBuffer/VtxBuffer.
+	@(link_name="ImDrawList_CloneOutput") DrawList_CloneOutput :: proc(self: ^DrawList) -> ^DrawList --- // Create a clone of the CmdBuffer/IdxBuffer/VtxBuffer. For multi-threaded rendering, consider using `imgui_threaded_rendering` from https://github.com/ocornut/imgui_club instead.
 	// Advanced: Channels
 	// - Use to split render into layers. By switching channels to can render out-of-order (e.g. submit FG primitives before BG primitives)
 	// - Use to minimize draw calls (e.g. if going back-and-forth between multiple clipping rectangles, prefer to append into separate channels then merge at the end)
@@ -2909,55 +3135,79 @@ foreign lib {
 	@(link_name="ImDrawList_PrimWriteVtx")  DrawList_PrimWriteVtx  :: proc(self: ^DrawList, pos: Vec2, uv: Vec2, col: u32)                                                                 ---
 	@(link_name="ImDrawList_PrimWriteIdx")  DrawList_PrimWriteIdx  :: proc(self: ^DrawList, idx: DrawIdx)                                                                                  ---
 	@(link_name="ImDrawList_PrimVtx")       DrawList_PrimVtx       :: proc(self: ^DrawList, pos: Vec2, uv: Vec2, col: u32)                                                                 --- // Write vertex with unique index
+	@(link_name="ImDrawList_PushTextureID") DrawList_PushTextureID :: proc(self: ^DrawList, tex_ref: TextureRef)                                                                           --- // RENAMED in 1.92.x
+	@(link_name="ImDrawList_PopTextureID")  DrawList_PopTextureID  :: proc(self: ^DrawList)                                                                                                --- // RENAMED in 1.92.x
 	// [Internal helpers]
-	@(link_name="ImDrawList__ResetForNewFrame")                     DrawList__ResetForNewFrame                     :: proc(self: ^DrawList)                                                                                                                                                      ---
-	@(link_name="ImDrawList__ClearFreeMemory")                      DrawList__ClearFreeMemory                      :: proc(self: ^DrawList)                                                                                                                                                      ---
-	@(link_name="ImDrawList__PopUnusedDrawCmd")                     DrawList__PopUnusedDrawCmd                     :: proc(self: ^DrawList)                                                                                                                                                      ---
-	@(link_name="ImDrawList__TryMergeDrawCmds")                     DrawList__TryMergeDrawCmds                     :: proc(self: ^DrawList)                                                                                                                                                      ---
-	@(link_name="ImDrawList__OnChangedClipRect")                    DrawList__OnChangedClipRect                    :: proc(self: ^DrawList)                                                                                                                                                      ---
-	@(link_name="ImDrawList__OnChangedTextureID")                   DrawList__OnChangedTextureID                   :: proc(self: ^DrawList)                                                                                                                                                      ---
-	@(link_name="ImDrawList__OnChangedVtxOffset")                   DrawList__OnChangedVtxOffset                   :: proc(self: ^DrawList)                                                                                                                                                      ---
-	@(link_name="ImDrawList__SetTextureID")                         DrawList__SetTextureID                         :: proc(self: ^DrawList, texture_id: TextureID)                                                                                                                               ---
-	@(link_name="ImDrawList__CalcCircleAutoSegmentCount")           DrawList__CalcCircleAutoSegmentCount           :: proc(self: ^DrawList, radius: f32) -> c.int                                                                                                                                ---
-	@(link_name="ImDrawList__PathArcToFastEx")                      DrawList__PathArcToFastEx                      :: proc(self: ^DrawList, center: Vec2, radius: f32, a_min_sample: c.int, a_max_sample: c.int, a_step: c.int)                                                                  ---
-	@(link_name="ImDrawList__PathArcToN")                           DrawList__PathArcToN                           :: proc(self: ^DrawList, center: Vec2, radius: f32, a_min: f32, a_max: f32, num_segments: c.int)                                                                              ---
-	@(link_name="ImDrawData_Clear")                                 DrawData_Clear                                 :: proc(self: ^DrawData)                                                                                                                                                      ---
-	@(link_name="ImDrawData_AddDrawList")                           DrawData_AddDrawList                           :: proc(self: ^DrawData, draw_list: ^DrawList)                                                                                                                                --- // Helper to add an external draw list into an existing ImDrawData.
-	@(link_name="ImDrawData_DeIndexAllBuffers")                     DrawData_DeIndexAllBuffers                     :: proc(self: ^DrawData)                                                                                                                                                      --- // Helper to convert all buffers from indexed to non-indexed, in case you cannot render indexed. Note: this is slow and most likely a waste of resources. Always prefer indexed rendering!
-	@(link_name="ImDrawData_ScaleClipRects")                        DrawData_ScaleClipRects                        :: proc(self: ^DrawData, fb_scale: Vec2)                                                                                                                                      --- // Helper to scale the ClipRect field of each ImDrawCmd. Use if your final output buffer is at a different scale than Dear ImGui expects, or if there is a difference between your window resolution and framebuffer resolution.
-	@(link_name="ImFontGlyphRangesBuilder_Clear")                   FontGlyphRangesBuilder_Clear                   :: proc(self: ^FontGlyphRangesBuilder)                                                                                                                                        ---
-	@(link_name="ImFontGlyphRangesBuilder_GetBit")                  FontGlyphRangesBuilder_GetBit                  :: proc(self: ^FontGlyphRangesBuilder, n: c.size_t) -> bool                                                                                                                   --- // Get bit n in the array
-	@(link_name="ImFontGlyphRangesBuilder_SetBit")                  FontGlyphRangesBuilder_SetBit                  :: proc(self: ^FontGlyphRangesBuilder, n: c.size_t)                                                                                                                           --- // Set bit n in the array
-	@(link_name="ImFontGlyphRangesBuilder_AddChar")                 FontGlyphRangesBuilder_AddChar                 :: proc(self: ^FontGlyphRangesBuilder, _c: Wchar)                                                                                                                             --- // Add character
-	@(link_name="ImFontGlyphRangesBuilder_AddText")                 FontGlyphRangesBuilder_AddText                 :: proc(self: ^FontGlyphRangesBuilder, text: cstring, text_end: cstring = nil)                                                                                                --- // Add string (each character of the UTF-8 string are added)
-	@(link_name="ImFontGlyphRangesBuilder_AddRanges")               FontGlyphRangesBuilder_AddRanges               :: proc(self: ^FontGlyphRangesBuilder, ranges: ^Wchar)                                                                                                                        --- // Add ranges, e.g. builder.AddRanges(ImFontAtlas::GetGlyphRangesDefault()) to force add all of ASCII/Latin+Ext
-	@(link_name="ImFontGlyphRangesBuilder_BuildRanges")             FontGlyphRangesBuilder_BuildRanges             :: proc(self: ^FontGlyphRangesBuilder, out_ranges: ^Vector_Wchar)                                                                                                             --- // Output new ranges (ImVector_Construct()/ImVector_Destruct() can be used to safely construct out_ranges)
-	@(link_name="ImFontAtlasCustomRect_IsPacked")                   FontAtlasCustomRect_IsPacked                   :: proc(self: ^FontAtlasCustomRect) -> bool                                                                                                                                   ---
-	@(link_name="ImFontAtlas_AddFont")                              FontAtlas_AddFont                              :: proc(self: ^FontAtlas, font_cfg: ^FontConfig) -> ^Font                                                                                                                     ---
-	@(link_name="ImFontAtlas_AddFontDefault")                       FontAtlas_AddFontDefault                       :: proc(self: ^FontAtlas, font_cfg: ^FontConfig = nil) -> ^Font                                                                                                               ---
-	@(link_name="ImFontAtlas_AddFontFromFileTTF")                   FontAtlas_AddFontFromFileTTF                   :: proc(self: ^FontAtlas, filename: cstring, size_pixels: f32, font_cfg: ^FontConfig = nil, glyph_ranges: ^Wchar = nil) -> ^Font                                              ---
-	@(link_name="ImFontAtlas_AddFontFromMemoryTTF")                 FontAtlas_AddFontFromMemoryTTF                 :: proc(self: ^FontAtlas, font_data: rawptr, font_data_size: c.int, size_pixels: f32, font_cfg: ^FontConfig = nil, glyph_ranges: ^Wchar = nil) -> ^Font                       --- // Note: Transfer ownership of 'ttf_data' to ImFontAtlas! Will be deleted after destruction of the atlas. Set font_cfg->FontDataOwnedByAtlas=false to keep ownership of your data and it won't be freed.
-	@(link_name="ImFontAtlas_AddFontFromMemoryCompressedTTF")       FontAtlas_AddFontFromMemoryCompressedTTF       :: proc(self: ^FontAtlas, compressed_font_data: rawptr, compressed_font_data_size: c.int, size_pixels: f32, font_cfg: ^FontConfig = nil, glyph_ranges: ^Wchar = nil) -> ^Font --- // 'compressed_font_data' still owned by caller. Compress with binary_to_compressed_c.cpp.
-	@(link_name="ImFontAtlas_AddFontFromMemoryCompressedBase85TTF") FontAtlas_AddFontFromMemoryCompressedBase85TTF :: proc(self: ^FontAtlas, compressed_font_data_base85: cstring, size_pixels: f32, font_cfg: ^FontConfig = nil, glyph_ranges: ^Wchar = nil) -> ^Font                           --- // 'compressed_font_data_base85' still owned by caller. Compress with binary_to_compressed_c.cpp with -base85 parameter.
-	@(link_name="ImFontAtlas_ClearInputData")                       FontAtlas_ClearInputData                       :: proc(self: ^FontAtlas)                                                                                                                                                     --- // Clear input data (all ImFontConfig structures including sizes, TTF data, glyph ranges, etc.) = all the data used to build the texture and fonts.
-	@(link_name="ImFontAtlas_ClearFonts")                           FontAtlas_ClearFonts                           :: proc(self: ^FontAtlas)                                                                                                                                                     --- // Clear input+output font data (same as ClearInputData() + glyphs storage, UV coordinates).
-	@(link_name="ImFontAtlas_ClearTexData")                         FontAtlas_ClearTexData                         :: proc(self: ^FontAtlas)                                                                                                                                                     --- // Clear output texture data (CPU side). Saves RAM once the texture has been copied to graphics memory.
-	@(link_name="ImFontAtlas_Clear")                                FontAtlas_Clear                                :: proc(self: ^FontAtlas)                                                                                                                                                     --- // Clear all input and output.
-	// Build atlas, retrieve pixel data.
-	// User is in charge of copying the pixels into graphics memory (e.g. create a texture with your engine). Then store your texture handle with SetTexID().
-	// The pitch is always = Width * BytesPerPixels (1 or 4)
-	// Building in RGBA32 format is provided for convenience and compatibility, but note that unless you manually manipulate or copy color data into
-	// the texture (e.g. when using the AddCustomRect*** api), then the RGB pixels emitted will always be white (~75% of memory/bandwidth waste.
-	@(link_name="ImFontAtlas_Build")              FontAtlas_Build              :: proc(self: ^FontAtlas) -> bool                                                                                          --- // Build pixels data. This is called automatically for you by the GetTexData*** functions.
-	@(link_name="ImFontAtlas_GetTexDataAsAlpha8") FontAtlas_GetTexDataAsAlpha8 :: proc(self: ^FontAtlas, out_pixels: ^^c.uchar, out_width: ^c.int, out_height: ^c.int, out_bytes_per_pixel: ^c.int = nil) --- // 1 byte per-pixel
-	@(link_name="ImFontAtlas_GetTexDataAsRGBA32") FontAtlas_GetTexDataAsRGBA32 :: proc(self: ^FontAtlas, out_pixels: ^^c.uchar, out_width: ^c.int, out_height: ^c.int, out_bytes_per_pixel: ^c.int = nil) --- // 4 bytes-per-pixel
-	@(link_name="ImFontAtlas_IsBuilt")            FontAtlas_IsBuilt            :: proc(self: ^FontAtlas) -> bool                                                                                          --- // Bit ambiguous: used to detect when user didn't build texture but effectively we should check TexID != 0 except that would be backend dependent...
-	@(link_name="ImFontAtlas_SetTexID")           FontAtlas_SetTexID           :: proc(self: ^FontAtlas, id: TextureID)                                                                                   ---
+	@(link_name="ImDrawList__SetDrawListSharedData")      DrawList__SetDrawListSharedData      :: proc(self: ^DrawList, data: ^DrawListSharedData)                                                          ---
+	@(link_name="ImDrawList__ResetForNewFrame")           DrawList__ResetForNewFrame           :: proc(self: ^DrawList)                                                                                     ---
+	@(link_name="ImDrawList__ClearFreeMemory")            DrawList__ClearFreeMemory            :: proc(self: ^DrawList)                                                                                     ---
+	@(link_name="ImDrawList__PopUnusedDrawCmd")           DrawList__PopUnusedDrawCmd           :: proc(self: ^DrawList)                                                                                     ---
+	@(link_name="ImDrawList__TryMergeDrawCmds")           DrawList__TryMergeDrawCmds           :: proc(self: ^DrawList)                                                                                     ---
+	@(link_name="ImDrawList__OnChangedClipRect")          DrawList__OnChangedClipRect          :: proc(self: ^DrawList)                                                                                     ---
+	@(link_name="ImDrawList__OnChangedTexture")           DrawList__OnChangedTexture           :: proc(self: ^DrawList)                                                                                     ---
+	@(link_name="ImDrawList__OnChangedVtxOffset")         DrawList__OnChangedVtxOffset         :: proc(self: ^DrawList)                                                                                     ---
+	@(link_name="ImDrawList__SetTexture")                 DrawList__SetTexture                 :: proc(self: ^DrawList, tex_ref: TextureRef)                                                                ---
+	@(link_name="ImDrawList__CalcCircleAutoSegmentCount") DrawList__CalcCircleAutoSegmentCount :: proc(self: ^DrawList, radius: f32) -> c.int                                                               ---
+	@(link_name="ImDrawList__PathArcToFastEx")            DrawList__PathArcToFastEx            :: proc(self: ^DrawList, center: Vec2, radius: f32, a_min_sample: c.int, a_max_sample: c.int, a_step: c.int) ---
+	@(link_name="ImDrawList__PathArcToN")                 DrawList__PathArcToN                 :: proc(self: ^DrawList, center: Vec2, radius: f32, a_min: f32, a_max: f32, num_segments: c.int)             ---
+	@(link_name="ImDrawData_Clear")                       DrawData_Clear                       :: proc(self: ^DrawData)                                                                                     ---
+	@(link_name="ImDrawData_AddDrawList")                 DrawData_AddDrawList                 :: proc(self: ^DrawData, draw_list: ^DrawList)                                                               --- // Helper to add an external draw list into an existing ImDrawData.
+	@(link_name="ImDrawData_DeIndexAllBuffers")           DrawData_DeIndexAllBuffers           :: proc(self: ^DrawData)                                                                                     --- // Helper to convert all buffers from indexed to non-indexed, in case you cannot render indexed. Note: this is slow and most likely a waste of resources. Always prefer indexed rendering!
+	@(link_name="ImDrawData_ScaleClipRects")              DrawData_ScaleClipRects              :: proc(self: ^DrawData, fb_scale: Vec2)                                                                     --- // Helper to scale the ClipRect field of each ImDrawCmd. Use if your final output buffer is at a different scale than Dear ImGui expects, or if there is a difference between your window resolution and framebuffer resolution.
+	@(link_name="ImTextureData_Create")                   TextureData_Create                   :: proc(self: ^TextureData, format: TextureFormat, w: c.int, h: c.int)                                       ---
+	@(link_name="ImTextureData_DestroyPixels")            TextureData_DestroyPixels            :: proc(self: ^TextureData)                                                                                  ---
+	@(link_name="ImTextureData_GetPixels")                TextureData_GetPixels                :: proc(self: ^TextureData) -> rawptr                                                                        ---
+	@(link_name="ImTextureData_GetPixelsAt")              TextureData_GetPixelsAt              :: proc(self: ^TextureData, x: c.int, y: c.int) -> rawptr                                                    ---
+	@(link_name="ImTextureData_GetSizeInBytes")           TextureData_GetSizeInBytes           :: proc(self: ^TextureData) -> c.int                                                                         ---
+	@(link_name="ImTextureData_GetPitch")                 TextureData_GetPitch                 :: proc(self: ^TextureData) -> c.int                                                                         ---
+	@(link_name="ImTextureData_GetTexRef")                TextureData_GetTexRef                :: proc(self: ^TextureData) -> TextureRef                                                                    ---
+	@(link_name="ImTextureData_GetTexID")                 TextureData_GetTexID                 :: proc(self: ^TextureData) -> TextureID                                                                     ---
+	// Called by Renderer backend
+	// - Call SetTexID() and SetStatus() after honoring texture requests. Never modify TexID and Status directly!
+	// - A backend may decide to destroy a texture that we did not request to destroy, which is fine (e.g. freeing resources), but we immediately set the texture back in _WantCreate mode.
+	@(link_name="ImTextureData_SetTexID")                           TextureData_SetTexID                           :: proc(self: ^TextureData, tex_id: TextureID)                                                                                                                                      ---
+	@(link_name="ImTextureData_SetStatus")                          TextureData_SetStatus                          :: proc(self: ^TextureData, status: TextureStatus)                                                                                                                                  ---
+	@(link_name="ImFontGlyphRangesBuilder_Clear")                   FontGlyphRangesBuilder_Clear                   :: proc(self: ^FontGlyphRangesBuilder)                                                                                                                                              ---
+	@(link_name="ImFontGlyphRangesBuilder_GetBit")                  FontGlyphRangesBuilder_GetBit                  :: proc(self: ^FontGlyphRangesBuilder, n: c.size_t) -> bool                                                                                                                         --- // Get bit n in the array
+	@(link_name="ImFontGlyphRangesBuilder_SetBit")                  FontGlyphRangesBuilder_SetBit                  :: proc(self: ^FontGlyphRangesBuilder, n: c.size_t)                                                                                                                                 --- // Set bit n in the array
+	@(link_name="ImFontGlyphRangesBuilder_AddChar")                 FontGlyphRangesBuilder_AddChar                 :: proc(self: ^FontGlyphRangesBuilder, _c: Wchar)                                                                                                                                   --- // Add character
+	@(link_name="ImFontGlyphRangesBuilder_AddText")                 FontGlyphRangesBuilder_AddText                 :: proc(self: ^FontGlyphRangesBuilder, text: cstring, text_end: cstring = nil)                                                                                                      --- // Add string (each character of the UTF-8 string are added)
+	@(link_name="ImFontGlyphRangesBuilder_AddRanges")               FontGlyphRangesBuilder_AddRanges               :: proc(self: ^FontGlyphRangesBuilder, ranges: ^Wchar)                                                                                                                              --- // Add ranges, e.g. builder.AddRanges(ImFontAtlas::GetGlyphRangesDefault()) to force add all of ASCII/Latin+Ext
+	@(link_name="ImFontGlyphRangesBuilder_BuildRanges")             FontGlyphRangesBuilder_BuildRanges             :: proc(self: ^FontGlyphRangesBuilder, out_ranges: ^Vector_Wchar)                                                                                                                   --- // Output new ranges (ImVector_Construct()/ImVector_Destruct() can be used to safely construct out_ranges)
+	@(link_name="ImFontAtlas_AddFont")                              FontAtlas_AddFont                              :: proc(self: ^FontAtlas, font_cfg: ^FontConfig) -> ^Font                                                                                                                           ---
+	@(link_name="ImFontAtlas_AddFontDefault")                       FontAtlas_AddFontDefault                       :: proc(self: ^FontAtlas, font_cfg: ^FontConfig = nil) -> ^Font                                                                                                                     ---
+	@(link_name="ImFontAtlas_AddFontFromFileTTF")                   FontAtlas_AddFontFromFileTTF                   :: proc(self: ^FontAtlas, filename: cstring, size_pixels: f32 = 0.0, font_cfg: ^FontConfig = nil, glyph_ranges: ^Wchar = nil) -> ^Font                                              ---
+	@(link_name="ImFontAtlas_AddFontFromMemoryTTF")                 FontAtlas_AddFontFromMemoryTTF                 :: proc(self: ^FontAtlas, font_data: rawptr, font_data_size: c.int, size_pixels: f32 = 0.0, font_cfg: ^FontConfig = nil, glyph_ranges: ^Wchar = nil) -> ^Font                       --- // Note: Transfer ownership of 'ttf_data' to ImFontAtlas! Will be deleted after destruction of the atlas. Set font_cfg->FontDataOwnedByAtlas=false to keep ownership of your data and it won't be freed.
+	@(link_name="ImFontAtlas_AddFontFromMemoryCompressedTTF")       FontAtlas_AddFontFromMemoryCompressedTTF       :: proc(self: ^FontAtlas, compressed_font_data: rawptr, compressed_font_data_size: c.int, size_pixels: f32 = 0.0, font_cfg: ^FontConfig = nil, glyph_ranges: ^Wchar = nil) -> ^Font --- // 'compressed_font_data' still owned by caller. Compress with binary_to_compressed_c.cpp.
+	@(link_name="ImFontAtlas_AddFontFromMemoryCompressedBase85TTF") FontAtlas_AddFontFromMemoryCompressedBase85TTF :: proc(self: ^FontAtlas, compressed_font_data_base85: cstring, size_pixels: f32 = 0.0, font_cfg: ^FontConfig = nil, glyph_ranges: ^Wchar = nil) -> ^Font                           --- // 'compressed_font_data_base85' still owned by caller. Compress with binary_to_compressed_c.cpp with -base85 parameter.
+	@(link_name="ImFontAtlas_RemoveFont")                           FontAtlas_RemoveFont                           :: proc(self: ^FontAtlas, font: ^Font)                                                                                                                                              ---
+	@(link_name="ImFontAtlas_Clear")                                FontAtlas_Clear                                :: proc(self: ^FontAtlas)                                                                                                                                                           --- // Clear everything (input fonts, output glyphs/textures)
+	@(link_name="ImFontAtlas_CompactCache")                         FontAtlas_CompactCache                         :: proc(self: ^FontAtlas)                                                                                                                                                           --- // Compact cached glyphs and texture.
+	@(link_name="ImFontAtlas_SetFontLoader")                        FontAtlas_SetFontLoader                        :: proc(self: ^FontAtlas, font_loader: ^FontLoader)                                                                                                                                 --- // Change font loader at runtime.
+	// As we are transitioning toward a new font system, we expect to obsolete those soon:
+	@(link_name="ImFontAtlas_ClearInputData") FontAtlas_ClearInputData :: proc(self: ^FontAtlas) --- // [OBSOLETE] Clear input data (all ImFontConfig structures including sizes, TTF data, glyph ranges, etc.) = all the data used to build the texture and fonts.
+	@(link_name="ImFontAtlas_ClearFonts")     FontAtlas_ClearFonts     :: proc(self: ^FontAtlas) --- // [OBSOLETE] Clear input+output font data (same as ClearInputData() + glyphs storage, UV coordinates).
+	@(link_name="ImFontAtlas_ClearTexData")   FontAtlas_ClearTexData   :: proc(self: ^FontAtlas) --- // [OBSOLETE] Clear CPU-side copy of the texture data. Saves RAM once the texture has been copied to graphics memory.
+	// Legacy path for build atlas + retrieving pixel data.
+	// - User is in charge of copying the pixels into graphics memory (e.g. create a texture with your engine). Then store your texture handle with SetTexID().
+	// - The pitch is always = Width * BytesPerPixels (1 or 4)
+	// - Building in RGBA32 format is provided for convenience and compatibility, but note that unless you manually manipulate or copy color data into
+	//   the texture (e.g. when using the AddCustomRect*** api), then the RGB pixels emitted will always be white (~75% of memory/bandwidth waste).
+	// - From 1.92 with backends supporting ImGuiBackendFlags_RendererHasTextures:
+	//   - Calling Build(), GetTexDataAsAlpha8(), GetTexDataAsRGBA32() is not needed.
+	//   - In backend: replace calls to ImFontAtlas::SetTexID() with calls to ImTextureData::SetTexID() after honoring texture creation.
+	@(link_name="ImFontAtlas_Build")                FontAtlas_Build                :: proc(self: ^FontAtlas) -> bool                                                                                          --- // Build pixels data. This is called automatically for you by the GetTexData*** functions.
+	@(link_name="ImFontAtlas_GetTexDataAsAlpha8")   FontAtlas_GetTexDataAsAlpha8   :: proc(self: ^FontAtlas, out_pixels: ^^c.uchar, out_width: ^c.int, out_height: ^c.int, out_bytes_per_pixel: ^c.int = nil) --- // 1 byte per-pixel
+	@(link_name="ImFontAtlas_GetTexDataAsRGBA32")   FontAtlas_GetTexDataAsRGBA32   :: proc(self: ^FontAtlas, out_pixels: ^^c.uchar, out_width: ^c.int, out_height: ^c.int, out_bytes_per_pixel: ^c.int = nil) --- // 4 bytes-per-pixel
+	@(link_name="ImFontAtlas_SetTexID")             FontAtlas_SetTexID             :: proc(self: ^FontAtlas, id: TextureID)                                                                                   --- // Called by legacy backends. May be called before texture creation.
+	@(link_name="ImFontAtlas_SetTexIDImTextureRef") FontAtlas_SetTexIDImTextureRef :: proc(self: ^FontAtlas, id: TextureRef)                                                                                  --- // Called by legacy backends.
+	@(link_name="ImFontAtlas_IsBuilt")              FontAtlas_IsBuilt              :: proc(self: ^FontAtlas) -> bool                                                                                          --- // Bit ambiguous: used to detect when user didn't build texture but effectively we should check TexID != 0 except that would be backend dependent..
+	// Since 1.92: specifying glyph ranges is only useful/necessary if your backend doesn't support ImGuiBackendFlags_RendererHasTextures!
+	@(link_name="ImFontAtlas_GetGlyphRangesDefault") FontAtlas_GetGlyphRangesDefault :: proc(self: ^FontAtlas) -> ^Wchar --- // Basic Latin, Extended Latin
 	// Helpers to retrieve list of common Unicode ranges (2 value per range, values are inclusive, zero-terminated list)
 	// NB: Make sure that your string are UTF-8 and NOT in your local code page.
 	// Read https://github.com/ocornut/imgui/blob/master/docs/FONTS.md/#about-utf-8-encoding for details.
 	// NB: Consider using ImFontGlyphRangesBuilder to build glyph ranges from textual data.
-	@(link_name="ImFontAtlas_GetGlyphRangesDefault")                 FontAtlas_GetGlyphRangesDefault                 :: proc(self: ^FontAtlas) -> ^Wchar --- // Basic Latin, Extended Latin
 	@(link_name="ImFontAtlas_GetGlyphRangesGreek")                   FontAtlas_GetGlyphRangesGreek                   :: proc(self: ^FontAtlas) -> ^Wchar --- // Default + Greek and Coptic
 	@(link_name="ImFontAtlas_GetGlyphRangesKorean")                  FontAtlas_GetGlyphRangesKorean                  :: proc(self: ^FontAtlas) -> ^Wchar --- // Default + Korean characters
 	@(link_name="ImFontAtlas_GetGlyphRangesJapanese")                FontAtlas_GetGlyphRangesJapanese                :: proc(self: ^FontAtlas) -> ^Wchar --- // Default + Hiragana, Katakana, Half-Width, Selection of 2999 Ideographs
@@ -2966,42 +3216,62 @@ foreign lib {
 	@(link_name="ImFontAtlas_GetGlyphRangesCyrillic")                FontAtlas_GetGlyphRangesCyrillic                :: proc(self: ^FontAtlas) -> ^Wchar --- // Default + about 400 Cyrillic characters
 	@(link_name="ImFontAtlas_GetGlyphRangesThai")                    FontAtlas_GetGlyphRangesThai                    :: proc(self: ^FontAtlas) -> ^Wchar --- // Default + Thai characters
 	@(link_name="ImFontAtlas_GetGlyphRangesVietnamese")              FontAtlas_GetGlyphRangesVietnamese              :: proc(self: ^FontAtlas) -> ^Wchar --- // Default + Vietnamese characters
-	// You can request arbitrary rectangles to be packed into the atlas, for your own purposes.
-	// - After calling Build(), you can query the rectangle position and render your pixels.
-	// - If you render colored output, set 'atlas->TexPixelsUseColors = true' as this may help some backends decide of preferred texture format.
-	// - You can also request your rectangles to be mapped as font glyph (given a font + Unicode point),
-	//   so you can render e.g. custom colorful icons and use them as regular glyphs.
+	// Register and retrieve custom rectangles
+	// - You can request arbitrary rectangles to be packed into the atlas, for your own purpose.
+	// - Since 1.92.X, packing is done immediately in the function call (previously packing was done during the Build call)
+	// - You can render your pixels into the texture right after calling the AddCustomRect() functions.
+	// - VERY IMPORTANT:
+	//   - Texture may be created/resized at any time when calling ImGui or ImFontAtlas functions.
+	//   - IT WILL INVALIDATE RECTANGLE DATA SUCH AS UV COORDINATES. Always use latest values from GetCustomRect().
+	//   - UV coordinates are associated to the current texture identifier aka 'atlas->TexRef'. Both TexRef and UV coordinates are typically changed at the same time.
+	// - If you render colored output into your custom rectangles: set 'atlas->TexPixelsUseColors = true' as this may help some backends decide of preferred texture format.
 	// - Read docs/FONTS.md for more details about using colorful icons.
-	// - Note: this API may be redesigned later in order to support multi-monitor varying DPI settings.
-	@(link_name="ImFontAtlas_AddCustomRectRegular")   FontAtlas_AddCustomRectRegular   :: proc(self: ^FontAtlas, width: c.int, height: c.int) -> c.int                                                                ---
-	@(link_name="ImFontAtlas_AddCustomRectFontGlyph") FontAtlas_AddCustomRectFontGlyph :: proc(self: ^FontAtlas, font: ^Font, id: Wchar, width: c.int, height: c.int, advance_x: f32, offset: Vec2 = {0, 0}) -> c.int ---
-	@(link_name="ImFontAtlas_GetCustomRectByIndex")   FontAtlas_GetCustomRectByIndex   :: proc(self: ^FontAtlas, index: c.int) -> ^FontAtlasCustomRect                                                                ---
-	// [Internal]
-	@(link_name="ImFontAtlas_CalcCustomRectUV") FontAtlas_CalcCustomRectUV :: proc(self: ^FontAtlas, rect: ^FontAtlasCustomRect, out_uv_min: ^Vec2, out_uv_max: ^Vec2) ---
-	@(link_name="ImFont_FindGlyph")             Font_FindGlyph             :: proc(self: ^Font, _c: Wchar) -> ^FontGlyph                                               ---
-	@(link_name="ImFont_FindGlyphNoFallback")   Font_FindGlyphNoFallback   :: proc(self: ^Font, _c: Wchar) -> ^FontGlyph                                               ---
-	@(link_name="ImFont_GetCharAdvance")        Font_GetCharAdvance        :: proc(self: ^Font, _c: Wchar) -> f32                                                      ---
-	@(link_name="ImFont_IsLoaded")              Font_IsLoaded              :: proc(self: ^Font) -> bool                                                                ---
-	@(link_name="ImFont_GetDebugName")          Font_GetDebugName          :: proc(self: ^Font) -> cstring                                                             ---
+	// - Note: this API may be reworked further in order to facilitate supporting e.g. multi-monitor, varying DPI settings.
+	// - (Pre-1.92 names) ------------> (1.92 names)
+	//   - GetCustomRectByIndex()   --> Use GetCustomRect()
+	//   - CalcCustomRectUV()       --> Use GetCustomRect() and read uv0, uv1 fields.
+	//   - AddCustomRectRegular()   --> Renamed to AddCustomRect()
+	//   - AddCustomRectFontGlyph() --> Prefer using custom ImFontLoader inside ImFontConfig
+	//   - ImFontAtlasCustomRect    --> Renamed to ImFontAtlasRect
+	@(link_name="ImFontAtlas_AddCustomRect")                 FontAtlas_AddCustomRect                 :: proc(self: ^FontAtlas, width: c.int, height: c.int, out_r: ^FontAtlasRect = nil) -> FontAtlasRectId                                                 --- // Register a rectangle. Return -1 (ImFontAtlasRectId_Invalid) on error.
+	@(link_name="ImFontAtlas_RemoveCustomRect")              FontAtlas_RemoveCustomRect              :: proc(self: ^FontAtlas, id: FontAtlasRectId)                                                                                                         --- // Unregister a rectangle. Existing pixels will stay in texture until resized / garbage collected.
+	@(link_name="ImFontAtlas_GetCustomRect")                 FontAtlas_GetCustomRect                 :: proc(self: ^FontAtlas, id: FontAtlasRectId, out_r: ^FontAtlasRect) -> bool                                                                          --- // Get rectangle coordinates for current texture. Valid immediately, never store this (read above)!
+	@(link_name="ImFontAtlas_AddCustomRectRegular")          FontAtlas_AddCustomRectRegular          :: proc(self: ^FontAtlas, w: c.int, h: c.int) -> FontAtlasRectId                                                                                       --- // RENAMED in 1.92.X
+	@(link_name="ImFontAtlas_GetCustomRectByIndex")          FontAtlas_GetCustomRectByIndex          :: proc(self: ^FontAtlas, id: FontAtlasRectId) -> ^FontAtlasRect                                                                                       --- // OBSOLETED in 1.92.X
+	@(link_name="ImFontAtlas_CalcCustomRectUV")              FontAtlas_CalcCustomRectUV              :: proc(self: ^FontAtlas, r: ^FontAtlasRect, out_uv_min: ^Vec2, out_uv_max: ^Vec2)                                                                     --- // OBSOLETED in 1.92.X
+	@(link_name="ImFontAtlas_AddCustomRectFontGlyph")        FontAtlas_AddCustomRectFontGlyph        :: proc(self: ^FontAtlas, font: ^Font, codepoint: Wchar, w: c.int, h: c.int, advance_x: f32, offset: Vec2 = {0, 0}) -> FontAtlasRectId                 --- // OBSOLETED in 1.92.X: Use custom ImFontLoader in ImFontConfig
+	@(link_name="ImFontAtlas_AddCustomRectFontGlyphForSize") FontAtlas_AddCustomRectFontGlyphForSize :: proc(self: ^FontAtlas, font: ^Font, font_size: f32, codepoint: Wchar, w: c.int, h: c.int, advance_x: f32, offset: Vec2 = {0, 0}) -> FontAtlasRectId --- // ADDED AND OBSOLETED in 1.92.X
+	@(link_name="ImFontBaked_ClearOutputData")               FontBaked_ClearOutputData               :: proc(self: ^FontBaked)                                                                                                                              ---
+	@(link_name="ImFontBaked_FindGlyph")                     FontBaked_FindGlyph                     :: proc(self: ^FontBaked, _c: Wchar) -> ^FontGlyph                                                                                                     --- // Return U+FFFD glyph if requested glyph doesn't exists.
+	@(link_name="ImFontBaked_FindGlyphNoFallback")           FontBaked_FindGlyphNoFallback           :: proc(self: ^FontBaked, _c: Wchar) -> ^FontGlyph                                                                                                     --- // Return NULL if glyph doesn't exist
+	@(link_name="ImFontBaked_GetCharAdvance")                FontBaked_GetCharAdvance                :: proc(self: ^FontBaked, _c: Wchar) -> f32                                                                                                            ---
+	@(link_name="ImFontBaked_IsGlyphLoaded")                 FontBaked_IsGlyphLoaded                 :: proc(self: ^FontBaked, _c: Wchar) -> bool                                                                                                           ---
+	@(link_name="ImFont_IsGlyphInFont")                      Font_IsGlyphInFont                      :: proc(self: ^Font, _c: Wchar) -> bool                                                                                                                ---
+	@(link_name="ImFont_IsLoaded")                           Font_IsLoaded                           :: proc(self: ^Font) -> bool                                                                                                                           ---
+	@(link_name="ImFont_GetDebugName")                       Font_GetDebugName                       :: proc(self: ^Font) -> cstring                                                                                                                        --- // Fill ImFontConfig::Name.
 	// [Internal] Don't use!
 	// 'max_width' stops rendering after a certain width (could be turned into a 2d size). FLT_MAX to disable.
 	// 'wrap_width' enable automatic word-wrapping across multiple lines to fit into given width. 0.0f to disable.
-	@(link_name="ImFont_CalcTextSizeA")         Font_CalcTextSizeA         :: proc(self: ^Font, size: f32, max_width: f32, wrap_width: f32, text_begin: cstring, text_end: cstring = nil, remaining: ^cstring = nil) -> Vec2                                       --- // utf8
-	@(link_name="ImFont_CalcWordWrapPositionA") Font_CalcWordWrapPositionA :: proc(self: ^Font, scale: f32, text: cstring, text_end: cstring, wrap_width: f32) -> cstring                                                                                          ---
-	@(link_name="ImFont_RenderChar")            Font_RenderChar            :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, _c: Wchar)                                                                                                   ---
-	@(link_name="ImFont_RenderText")            Font_RenderText            :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, clip_rect: Vec4, text_begin: cstring, text_end: cstring, wrap_width: f32 = 0.0, cpu_fine_clip: bool = false) ---
+	@(link_name="ImFont_GetFontBaked")          Font_GetFontBaked          :: proc(self: ^Font, font_size: f32, density: f32 = -1.0) -> ^FontBaked                                                                                                               --- // Get or create baked data for given size
+	@(link_name="ImFont_CalcTextSizeA")         Font_CalcTextSizeA         :: proc(self: ^Font, size: f32, max_width: f32, wrap_width: f32, text_begin: cstring, text_end: cstring = nil, out_remaining: ^cstring = nil) -> Vec2                                 ---
+	@(link_name="ImFont_CalcWordWrapPosition")  Font_CalcWordWrapPosition  :: proc(self: ^Font, size: f32, text: cstring, text_end: cstring, wrap_width: f32) -> cstring                                                                                         ---
+	@(link_name="ImFont_RenderChar")            Font_RenderChar            :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, _c: Wchar, cpu_fine_clip: ^Vec4 = nil)                                                                     ---
+	@(link_name="ImFont_RenderText")            Font_RenderText            :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, clip_rect: Vec4, text_begin: cstring, text_end: cstring, wrap_width: f32 = 0.0, flags: DrawTextFlags = {}) ---
+	@(link_name="ImFont_CalcWordWrapPositionA") Font_CalcWordWrapPositionA :: proc(self: ^Font, scale: f32, text: cstring, text_end: cstring, wrap_width: f32) -> cstring                                                                                        ---
 	// [Internal] Don't use!
-	@(link_name="ImFont_BuildLookupTable")   Font_BuildLookupTable   :: proc(self: ^Font)                                                                                                                          ---
-	@(link_name="ImFont_ClearOutputData")    Font_ClearOutputData    :: proc(self: ^Font)                                                                                                                          ---
-	@(link_name="ImFont_GrowIndex")          Font_GrowIndex          :: proc(self: ^Font, new_size: c.int)                                                                                                         ---
-	@(link_name="ImFont_AddGlyph")           Font_AddGlyph           :: proc(self: ^Font, src_cfg: ^FontConfig, _c: Wchar, x0: f32, y0: f32, x1: f32, y1: f32, u0: f32, v0: f32, u1: f32, v1: f32, advance_x: f32) ---
-	@(link_name="ImFont_AddRemapChar")       Font_AddRemapChar       :: proc(self: ^Font, dst: Wchar, src: Wchar, overwrite_dst: bool = true)                                                                      --- // Makes 'dst' character/glyph points to 'src' character/glyph. Currently needs to be called AFTER fonts have been built.
-	@(link_name="ImFont_IsGlyphRangeUnused") Font_IsGlyphRangeUnused :: proc(self: ^Font, c_begin: c.uint, c_last: c.uint) -> bool                                                                                 ---
+	@(link_name="ImFont_ClearOutputData")    Font_ClearOutputData    :: proc(self: ^Font)                                             ---
+	@(link_name="ImFont_AddRemapChar")       Font_AddRemapChar       :: proc(self: ^Font, from_codepoint: Wchar, to_codepoint: Wchar) --- // Makes 'from_codepoint' character points to 'to_codepoint' glyph.
+	@(link_name="ImFont_IsGlyphRangeUnused") Font_IsGlyphRangeUnused :: proc(self: ^Font, c_begin: c.uint, c_last: c.uint) -> bool    ---
 	// Helpers
-	@(link_name="ImGuiViewport_GetCenter")     Viewport_GetCenter     :: proc(self: ^Viewport) -> Vec2 ---
-	@(link_name="ImGuiViewport_GetWorkCenter") Viewport_GetWorkCenter :: proc(self: ^Viewport) -> Vec2 ---
+	@(link_name="ImGuiViewport_GetCenter")               Viewport_GetCenter               :: proc(self: ^Viewport) -> Vec2 ---
+	@(link_name="ImGuiViewport_GetWorkCenter")           Viewport_GetWorkCenter           :: proc(self: ^Viewport) -> Vec2 ---
+	@(link_name="ImGuiPlatformIO_ClearPlatformHandlers") PlatformIO_ClearPlatformHandlers :: proc(self: ^PlatformIO)       --- // Clear all Platform_XXX fields. Typically called on Platform Backend shutdown.
+	@(link_name="ImGuiPlatformIO_ClearRendererHandlers") PlatformIO_ClearRendererHandlers :: proc(self: ^PlatformIO)       --- // Clear all Renderer_XXX fields. Typically called on Renderer Backend shutdown.
+	// OBSOLETED in 1.92.0 (from June 2025)
+	@(link_name="ImGui_PushFont")           PushFont           :: proc(font: ^Font) ---
+	@(link_name="ImGui_SetWindowFontScale") SetWindowFontScale :: proc(scale: f32)  --- // Set font scale factor for current window. Prefer using PushFont(NULL, style.FontSizeBase * factor) or use style.FontScaleMain to scale all windows.
 	// OBSOLETED in 1.91.9 (from February 2025)
-	@(link_name="ImGui_ImageImVec4") ImageImVec4 :: proc(user_texture_id: TextureID, image_size: Vec2, uv0: Vec2, uv1: Vec2, tint_col: Vec4, border_col: Vec4) --- // <-- border_col was removed in favor of ImGuiCol_ImageBorder.
+	@(link_name="ImGui_ImageImVec4") ImageImVec4 :: proc(tex_ref: TextureRef, image_size: Vec2, uv0: Vec2, uv1: Vec2, tint_col: Vec4, border_col: Vec4) --- // <-- 'border_col' was removed in favor of ImGuiCol_ImageBorder. If you use 'tint_col', use ImageWithBg() instead.
 	// OBSOLETED in 1.91.0 (from July 2024)
 	@(link_name="ImGui_PushButtonRepeat")          PushButtonRepeat          :: proc(repeat: bool)   ---
 	@(link_name="ImGui_PopButtonRepeat")           PopButtonRepeat           :: proc()               ---
@@ -3013,16 +3283,13 @@ foreign lib {
 	// OBSOLETED in 1.90.0 (from September 2023)
 	@(link_name="ImGui_BeginChildFrame") BeginChildFrame :: proc(id: ID, size: Vec2, window_flags: WindowFlags = {}) -> bool ---
 	@(link_name="ImGui_EndChildFrame")   EndChildFrame   :: proc()                                                           ---
-	//static inline bool BeginChild(const char* str_id, const ImVec2& size_arg, bool borders, ImGuiWindowFlags window_flags){ return BeginChild(str_id, size_arg, borders ? ImGuiChildFlags_Borders : ImGuiChildFlags_None, window_flags); } // Unnecessary as true == ImGuiChildFlags_Borders
-	//static inline bool BeginChild(ImGuiID id, const ImVec2& size_arg, bool borders, ImGuiWindowFlags window_flags)        { return BeginChild(id, size_arg, borders ? ImGuiChildFlags_Borders : ImGuiChildFlags_None, window_flags);     } // Unnecessary as true == ImGuiChildFlags_Borders
+	//inline bool       BeginChild(const char* str_id, const ImVec2& size_arg, bool borders, ImGuiWindowFlags window_flags){ return BeginChild(str_id, size_arg, borders ? ImGuiChildFlags_Borders : ImGuiChildFlags_None, window_flags); } // Unnecessary as true == ImGuiChildFlags_Borders
+	//inline bool       BeginChild(ImGuiID id, const ImVec2& size_arg, bool borders, ImGuiWindowFlags window_flags)        { return BeginChild(id, size_arg, borders ? ImGuiChildFlags_Borders : ImGuiChildFlags_None, window_flags);     } // Unnecessary as true == ImGuiChildFlags_Borders
 	@(link_name="ImGui_ShowStackToolWindow") ShowStackToolWindow :: proc(p_open: ^bool = nil)                                                                                                                                                                                            ---
 	@(link_name="ImGui_ComboObsolete")       ComboObsolete       :: proc(label: cstring, current_item: ^c.int, old_callback: proc "c" (user_data: rawptr, idx: c.int, out_text: ^cstring) -> bool, user_data: rawptr, items_count: c.int, popup_max_height_in_items: c.int = -1) -> bool ---
 	@(link_name="ImGui_ListBoxObsolete")     ListBoxObsolete     :: proc(label: cstring, current_item: ^c.int, old_callback: proc "c" (user_data: rawptr, idx: c.int, out_text: ^cstring) -> bool, user_data: rawptr, items_count: c.int, height_in_items: c.int = -1) -> bool           ---
 	// OBSOLETED in 1.89.7 (from June 2023)
 	@(link_name="ImGui_SetItemAllowOverlap") SetItemAllowOverlap :: proc() --- // Use SetNextItemAllowOverlap() before item.
-	// OBSOLETED in 1.89.4 (from March 2023)
-	@(link_name="ImGui_PushAllowKeyboardFocus") PushAllowKeyboardFocus :: proc(tab_stop: bool) ---
-	@(link_name="ImGui_PopAllowKeyboardFocus")  PopAllowKeyboardFocus  :: proc()               ---
 }
 
 ////////////////////////////////////////////////////////////
@@ -3047,5 +3314,8 @@ InputTextCallback :: proc "c" (data: ^InputTextCallbackData) -> c.int     // Cal
 SizeCallback      :: proc "c" (data: ^SizeCallbackData)                   // Callback function for ImGui::SetNextWindowSizeConstraints()
 MemAllocFunc      :: proc "c" (sz: c.size_t, user_data: rawptr) -> rawptr // Function signature for ImGui::SetAllocatorFunctions()
 MemFreeFunc       :: proc "c" (ptr: rawptr, user_data: rawptr)            // Function signature for ImGui::SetAllocatorFunctions()
-TextureID         :: u64                                                  // Default: store a pointer or an integer fitting in a pointer (most renderer backends are ok with that)
+TextureID         :: u64                                                  // Default: store up to 64-bits (any pointer or integer). A majority of backends are ok with that.
 DrawCallback      :: proc "c" (parent_list: ^DrawList, cmd: ^DrawCmd)
+// An opaque identifier to a rectangle in the atlas. -1 when invalid.
+// The rectangle may move and UV may be invalidated, use GetCustomRect() to retrieve it.
+FontAtlasRectId :: c.int

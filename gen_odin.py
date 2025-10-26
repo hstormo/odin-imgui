@@ -137,6 +137,10 @@ _imgui_prefixes = [
 	"Im",
 ]
 
+_imgui_suffixes = [
+	"_im", #Ex: stbrp_node_im	
+]
+
 _imgui_namespaced_prefixes = [
 	["ImVector_", "Vector"],
 	["ImGuiStorage_", "Storage"],
@@ -151,6 +155,10 @@ def strip_imgui_branding(name: str) -> str:
 	for prefix in _imgui_prefixes:
 		if name.startswith(prefix):
 			return name.removeprefix(prefix)
+		
+	for suffix in _imgui_suffixes:
+		if name.endswith(suffix):
+			return name.removesuffix(suffix)
 
 	return name
 
@@ -450,6 +458,7 @@ _allowed_ifdef = [
 	"ImTextureID", # Concrete type overridden by user. Hard to deal with in Odin, so for now should not be set up by user
 	"ImDrawIdx", # Concrete type overridden by user. Hard to deal with in Odin, so for now should not be set up by user
 	"ImDrawCallback", # Concrete type overridden by user. Hard to deal with in Odin, so for now should not be set up by user
+	"IMGUI_DEBUG_HIGHLIGHT_ALL_ID_CONFLICTS", # Added in imgui 1.92.1, debug tool
 	# TODO: These were enabled to make imgui_internal.h to work, without thinking very hard about whether this was a good idea
 	"IMGUI_ENABLE_TEST_ENGINE",
 	"IMGUI_HAS_DOCK",
@@ -460,6 +469,7 @@ _allowed_ifdef = [
 	"IM_DRAWLIST_ARCFAST_TABLE_SIZE",
 	"IMGUI_ENABLE_STB_TRUETYPE",
 	"IMGUI_ENABLE_FREETYPE",
+	"IMGUI_STB_NAMESPACE", # Appeared in _ifdef after upgrading to 1.92.x
 ]
 
 _define_overrides = {
@@ -791,6 +801,7 @@ _imgui_struct_field_name_override = {
 	"LayoutType",
 	"DrawList",
 	"DockNode",
+	"FontBaked", # Added in 1.92.x
 }
 
 # These structs are defined properly if imgui_internal is included, but are
@@ -799,6 +810,9 @@ _imgui_struct_skip_if_not_imgui_internal = [
 	"ImDrawListSharedData",
 	"ImFontBuilderIO",
 	"ImGuiContext",
+	# Added in 1.92.x: 
+	"ImFontAtlasBuilder",
+	"ImFontLoader",
 ]
 
 def write_structs(file: typing.IO, structs):
@@ -961,7 +975,10 @@ _imgui_allowed_typedefs = [
 	"ImPoolIdx",
 	"ImGuiContextHookCallback",
 	"ImFileHandle",
-	"ImGuiErrorCallback"
+	"ImGuiErrorCallback",
+
+	# added in 1.92.x
+	"ImFontAtlasRectId"
 ]
 
 _imgui_typedef_overrides = {
