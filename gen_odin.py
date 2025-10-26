@@ -444,6 +444,7 @@ _allowed_user_defines = [
 	"IMGUI_DISABLE_OBSOLETE_FUNCTIONS",
 	# "IMGUI_DISABLE_OBSOLETE_KEYIO",
 	"IMGUI_USE_WCHAR32",
+	"IMGUI_ENABLE_FREETYPE",
 ]
 
 # Things which are allowed in an #ifdef
