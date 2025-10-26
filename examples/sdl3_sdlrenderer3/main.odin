@@ -1,6 +1,6 @@
 package imgui_example_sdl3_sdlrenderer3
 
-// This is an example of using the bindings with SDL2 and SDL_Renderer
+// This is an example of using the bindings with SDL3 and SDL_Renderer3
 // For a more complete example with comments, see:
 // https://github.com/ocornut/imgui/blob/docking/examples/example_sdl3_sdlrenderer3/main.cpp
 // Based on the above at tag `v1.92.4-docking` (e7d2d63)
