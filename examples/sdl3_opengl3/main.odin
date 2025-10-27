@@ -33,8 +33,8 @@ main :: proc() {
 	sdl.SetBooleanProperty(windowProps, sdl.PROP_WINDOW_CREATE_OPENGL_BOOLEAN, true)
 	sdl.SetBooleanProperty(windowProps, sdl.PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true)
 	// OpenGL 3.2 here, see the cpp example for more configurations
-	sdl.GL_SetAttribute(.CONTEXT_FLAGS, i32(sdl.GLContextFlag.FORWARD_COMPATIBLE))
-	sdl.GL_SetAttribute(.CONTEXT_PROFILE_MASK, 1) // replace with sdl.GLProfile.CORE once it's fixed
+	sdl.GL_SetAttribute(.CONTEXT_FLAGS, i32(sdl.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG))
+	sdl.GL_SetAttribute(.CONTEXT_PROFILE_MASK, i32(sdl.GL_CONTEXT_PROFILE_CORE))
 	sdl.GL_SetAttribute(.CONTEXT_MAJOR_VERSION, 3)
 	sdl.GL_SetAttribute(.CONTEXT_MINOR_VERSION, 2)
 	
