@@ -84,7 +84,7 @@ It seems likely to me that SDL3, and maybe Android will exist in vendor in the f
 | OpenGL 3       |     Yes      |     Yes     |                                                                      |
 | OSX            |     Yes      |     No      |                                                                      |
 | SDL 2          |     Yes      |     Yes     | Examples using DirectX11, Metal, OpenGL3, SDLRenderer2               |
-| SDL 3          |     Yes      |     Yes     | Examples using Metal, SDLRenderer3 								     |
+| SDL 3          |     Yes      |     Yes     | Examples using Metal, OpenGL3, SDLRenderer3 								     |
 | SDL_Renderer 2 |     Yes      |     Yes     | Has example, but Odin vendor library lacks required version (2.0.18) |
 | SDL_Renderer 3 |     Yes      |     Yes     |                                     								 |
 | Vulkan         |     Yes      |     No      | Tested in my own engine, but no example yet due to size              |
