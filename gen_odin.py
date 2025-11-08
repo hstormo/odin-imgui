@@ -257,17 +257,14 @@ def try_convert_enum_literal(name: str) -> str:
 
 	return name.replace("_", ".", 1)
 
-IM_DRAWLIST_TEX_LINES_WIDTH_MAX = 63
-IM_UNICODE_CODEPOINT_MAX = 0xFFFF
-
 _imgui_bounds_value_overrides = {
 	# The original value had to be removed (search for it to see why). Luckily this is equivalent
 	"ImGuiKey_KeysData_SIZE": "Key.COUNT",
 	# These are all resolvable using the data we have, but doing this for now.
 	# TODO: These can be evaluated with varying levels of effort
 	"32+1": "33",
-	"IM_DRAWLIST_TEX_LINES_WIDTH_MAX+1": str(int(IM_DRAWLIST_TEX_LINES_WIDTH_MAX+1)),
-	"(IM_UNICODE_CODEPOINT_MAX +1)/8192/8": str(int((IM_UNICODE_CODEPOINT_MAX +1)/8192/8)),
+	"IM_DRAWLIST_TEX_LINES_WIDTH_MAX+1": "DRAWLIST_TEX_LINES_WIDTH_MAX+1",
+	"(IM_UNICODE_CODEPOINT_MAX +1)/8192/8": "(UNICODE_CODEPOINT_MAX+1)/8192/8",
 }
 
 # Get array count for name. If not array, returns None

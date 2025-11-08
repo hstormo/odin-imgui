@@ -2028,26 +2028,26 @@ FontAtlas :: struct {
 	__anonymous_type1: __anonymous_type1, // Latest texture identifier == TexData->GetTexRef(). // RENAMED TexID to TexRef in 1.92.x
 	TexData:           ^TextureData,      // Latest texture.
 	// [Internal]
-	TexList:             Vector_TextureDataPtr,        // Texture list (most often TexList.Size == 1). TexData is always == TexList.back(). DO NOT USE DIRECTLY, USE GetDrawData().Textures[]/GetPlatformIO().Textures[] instead!
-	Locked:              bool,                         // Marked as locked during ImGui::NewFrame()..EndFrame() scope if TexUpdates are not supported. Any attempt to modify the atlas will assert.
-	RendererHasTextures: bool,                         // Copy of (BackendFlags & ImGuiBackendFlags_RendererHasTextures) from supporting context.
-	TexIsBuilt:          bool,                         // Set when texture was built matching current font input. Mostly useful for legacy IsBuilt() call.
-	TexPixelsUseColors:  bool,                         // Tell whether our texture data is known to use colors (rather than just alpha channel), in order to help backend select a format or conversion process.
-	TexUvScale:          Vec2,                         // = (1.0f/TexData->TexWidth, 1.0f/TexData->TexHeight). May change as new texture gets created.
-	TexUvWhitePixel:     Vec2,                         // Texture coordinates to a white pixel. May change as new texture gets created.
-	Fonts:               Vector_FontPtr,               // Hold all the fonts returned by AddFont*. Fonts[0] is the default font upon calling ImGui::NewFrame(), use ImGui::PushFont()/PopFont() to change the current font.
-	Sources:             Vector_FontConfig,            // Source/configuration data
-	TexUvLines:          [64]Vec4,                     // UVs for baked anti-aliased lines
-	TexNextUniqueID:     c.int,                        // Next value to be stored in TexData->UniqueID
-	FontNextUniqueID:    c.int,                        // Next value to be stored in ImFont->FontID
-	DrawListSharedDatas: Vector_DrawListSharedDataPtr, // List of users for this atlas. Typically one per Dear ImGui context.
-	Builder:             ^FontAtlasBuilder,            // Opaque interface to our data that doesn't need to be public and may be discarded when rebuilding.
-	FontLoader:          ^FontLoader,                  // Font loader opaque interface (default to use FreeType when IMGUI_ENABLE_FREETYPE is defined, otherwise default to use stb_truetype). Use SetFontLoader() to change this at runtime.
-	FontLoaderName:      cstring,                      // Font loader name (for display e.g. in About box) == FontLoader->Name
-	FontLoaderData:      rawptr,                       // Font backend opaque storage
-	FontLoaderFlags:     c.uint,                       // Shared flags (for all fonts) for font loader. THIS IS BUILD IMPLEMENTATION DEPENDENT (e.g. Per-font override is also available in ImFontConfig).
-	RefCount:            c.int,                        // Number of contexts using this atlas
-	OwnerContext:        ^Context,                     // Context which own the atlas will be in charge of updating and destroying it.
+	TexList:             Vector_TextureDataPtr,                // Texture list (most often TexList.Size == 1). TexData is always == TexList.back(). DO NOT USE DIRECTLY, USE GetDrawData().Textures[]/GetPlatformIO().Textures[] instead!
+	Locked:              bool,                                 // Marked as locked during ImGui::NewFrame()..EndFrame() scope if TexUpdates are not supported. Any attempt to modify the atlas will assert.
+	RendererHasTextures: bool,                                 // Copy of (BackendFlags & ImGuiBackendFlags_RendererHasTextures) from supporting context.
+	TexIsBuilt:          bool,                                 // Set when texture was built matching current font input. Mostly useful for legacy IsBuilt() call.
+	TexPixelsUseColors:  bool,                                 // Tell whether our texture data is known to use colors (rather than just alpha channel), in order to help backend select a format or conversion process.
+	TexUvScale:          Vec2,                                 // = (1.0f/TexData->TexWidth, 1.0f/TexData->TexHeight). May change as new texture gets created.
+	TexUvWhitePixel:     Vec2,                                 // Texture coordinates to a white pixel. May change as new texture gets created.
+	Fonts:               Vector_FontPtr,                       // Hold all the fonts returned by AddFont*. Fonts[0] is the default font upon calling ImGui::NewFrame(), use ImGui::PushFont()/PopFont() to change the current font.
+	Sources:             Vector_FontConfig,                    // Source/configuration data
+	TexUvLines:          [DRAWLIST_TEX_LINES_WIDTH_MAX+1]Vec4, // UVs for baked anti-aliased lines
+	TexNextUniqueID:     c.int,                                // Next value to be stored in TexData->UniqueID
+	FontNextUniqueID:    c.int,                                // Next value to be stored in ImFont->FontID
+	DrawListSharedDatas: Vector_DrawListSharedDataPtr,         // List of users for this atlas. Typically one per Dear ImGui context.
+	Builder:             ^FontAtlasBuilder,                    // Opaque interface to our data that doesn't need to be public and may be discarded when rebuilding.
+	FontLoader:          ^FontLoader,                          // Font loader opaque interface (default to use FreeType when IMGUI_ENABLE_FREETYPE is defined, otherwise default to use stb_truetype). Use SetFontLoader() to change this at runtime.
+	FontLoaderName:      cstring,                              // Font loader name (for display e.g. in About box) == FontLoader->Name
+	FontLoaderData:      rawptr,                               // Font backend opaque storage
+	FontLoaderFlags:     c.uint,                               // Shared flags (for all fonts) for font loader. THIS IS BUILD IMPLEMENTATION DEPENDENT (e.g. Per-font override is also available in ImFontConfig).
+	RefCount:            c.int,                                // Number of contexts using this atlas
+	OwnerContext:        ^Context,                             // Context which own the atlas will be in charge of updating and destroying it.
 	// Legacy: You can request your rectangles to be mapped as font glyph (given a font + Unicode point), so you can render e.g. custom colorful icons and use them as regular glyphs. --> Prefer using a custom ImFontLoader.
 	TempRect: FontAtlasRect, // For old GetCustomRectByIndex() API
 }
@@ -2096,15 +2096,15 @@ Font :: struct {
 	CurrentRasterizerDensity: f32,        // Current rasterizer density. This is a varying state of the font.
 	// [Internal] Members: Cold ~24-52 bytes
 	// Conceptually Sources[] is the list of font sources merged to create this font.
-	FontId:           ID,                   // Unique identifier for the font
-	LegacySize:       f32,                  // 4     // in  // Font size passed to AddFont(). Use for old code calling PushFont() expecting to use that size. (use ImGui::GetFontBaked() to get font baked at current bound size).
-	Sources:          Vector_FontConfigPtr, // 16    // in  // List of sources. Pointers within ContainerAtlas->Sources[]
-	EllipsisChar:     Wchar,                // 2-4   // out // Character used for ellipsis rendering ('...').
-	FallbackChar:     Wchar,                // 2-4   // out // Character used if a glyph isn't found (U+FFFD, '?')
-	Used8kPagesMap:   [1]u8,                // 1 bytes if ImWchar=ImWchar16, 16 bytes if ImWchar==ImWchar32. Store 1-bit for each block of 4K codepoints that has one active glyph. This is mainly used to facilitate iterations across all used codepoints.
-	EllipsisAutoBake: bool,                 // 1     //     // Mark when the "..." glyph needs to be generated.
-	RemapPairs:       Storage,              // 16    //     // Remapping pairs when using AddRemapChar(), otherwise empty.
-	Scale:            f32,                  // 4     // in  // Legacy base font scale (~1.0f), multiplied by the per-window font scale which you can adjust with SetWindowFontScale()
+	FontId:           ID,                                   // Unique identifier for the font
+	LegacySize:       f32,                                  // 4     // in  // Font size passed to AddFont(). Use for old code calling PushFont() expecting to use that size. (use ImGui::GetFontBaked() to get font baked at current bound size).
+	Sources:          Vector_FontConfigPtr,                 // 16    // in  // List of sources. Pointers within ContainerAtlas->Sources[]
+	EllipsisChar:     Wchar,                                // 2-4   // out // Character used for ellipsis rendering ('...').
+	FallbackChar:     Wchar,                                // 2-4   // out // Character used if a glyph isn't found (U+FFFD, '?')
+	Used8kPagesMap:   [(UNICODE_CODEPOINT_MAX+1)/8192/8]u8, // 1 bytes if ImWchar=ImWchar16, 16 bytes if ImWchar==ImWchar32. Store 1-bit for each block of 4K codepoints that has one active glyph. This is mainly used to facilitate iterations across all used codepoints.
+	EllipsisAutoBake: bool,                                 // 1     //     // Mark when the "..." glyph needs to be generated.
+	RemapPairs:       Storage,                              // 16    //     // Remapping pairs when using AddRemapChar(), otherwise empty.
+	Scale:            f32,                                  // 4     // in  // Legacy base font scale (~1.0f), multiplied by the per-window font scale which you can adjust with SetWindowFontScale()
 }
 
 // - Currently represents the Platform Window created by the application which is hosting our Dear ImGui windows.
